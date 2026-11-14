@@ -1,0 +1,7 @@
+AETHER FOR WINDOWS (FL Studio, VST3)
+
+1. Copy the Aether.vst3 folder to  C:\Program Files\Common Files\VST3\
+2. In FL Studio: Options > Manage plugins > Find more plugins.
+3. Aether shows up under Generators.
+
+If Windows SmartScreen warns about it, choose "More info" > "Run anyway" (the plugin isn't code-signed).

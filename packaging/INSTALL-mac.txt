@@ -1,0 +1,17 @@
+AETHER FOR MAC (FL Studio, VST3 + AU)
+
+Easy way
+1. Double-click "install-mac.command".
+   If macOS says it can't be opened: right-click it, choose Open, then Open again.
+2. Open FL Studio > Options > Manage plugins > Find more plugins (scan).
+3. Aether shows up under Generators. Add it to a channel like any synth.
+
+Manual way
+1. Copy Aether.vst3 to       /Library/Audio/Plug-Ins/VST3/
+   Copy Aether.component to  /Library/Audio/Plug-Ins/Components/
+2. Open Terminal and paste this line, then press Return (it clears the
+   "downloaded from the internet" flag, because the plugin isn't notarized by Apple):
+   sudo xattr -dr com.apple.quarantine /Library/Audio/Plug-Ins/VST3/Aether.vst3 /Library/Audio/Plug-Ins/Components/Aether.component
+3. Rescan plugins in FL Studio as above.
+
+Runs natively on Apple Silicon and Intel Macs (macOS 10.13 or newer).

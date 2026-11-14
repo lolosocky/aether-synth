@@ -1,0 +1,4 @@
+build/
+tests/ref/
+*.f32
+.DS_Store

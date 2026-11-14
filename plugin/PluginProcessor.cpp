@@ -53,7 +53,7 @@ void AetherProcessor::setParam(const char* id, float value) {
     if (auto* p = apvts.getParameter(id)) p->setValueNotifyingHost(p->convertTo0to1(value));
 }
 
-void AetherProcessor::applyPatch(const json& patch, bool resetParams) {
+void AetherProcessor::applyPatch(const json& patch, bool resetParams, bool resetVoices) {
     aether::Assets::Bundle b; b.p = aether::patchFromJson(patch);
     aether::Assets::get().fill(b);          // builds any wavetable or source this patch needs; safe off the audio thread
     Info inf; inf.name = aether::jstr(patch, "name", "Init"); inf.cat = aether::jstr(patch, "cat", "");
@@ -72,7 +72,7 @@ void AetherProcessor::applyPatch(const json& patch, bool resetParams) {
         setParam("cutoff", 0); setParam("reso", 0); setParam("attack", 0); setParam("release", 0);
         setParam("reverb", b.p.fx.rev.on ? (float)b.p.fx.rev.mix : 0.0f); setParam("delay", b.p.fx.dly.on ? (float)b.p.fx.dly.mix : 0.0f);
     }
-    { const juce::SpinLock::ScopedLockType sl(pendLock); pending = b; hasPending = true; }
+    { const juce::SpinLock::ScopedLockType sl(pendLock); pending = b; pendingReset = hasPending ? (pendingReset || resetVoices) : resetVoices; hasPending = true; }
     sendChangeMessage();
 }
 
@@ -80,8 +80,32 @@ void AetherProcessor::loadPreset(int index) {
     const auto& lib = Library::get(); const auto& ps = lib.data["presets"];
     if (ps.empty()) { applyPatch(json::object(), true); return; }
     index = juce::jlimit(0, (int)ps.size() - 1, index);
-    curIndex = index;
+    curIndex = index; edited = false; patchGen++;
     applyPatch(ps[(size_t)index], true);
+}
+
+void AetherProcessor::editPatch(const std::function<void(json&)>& fn, bool resetVoices) {
+    json p; { const juce::ScopedLock sl(infoLock); p = curPatch; }
+    fn(p);
+    edited = true;
+    applyPatch(p, false, resetVoices);
+}
+
+void AetherProcessor::setPatchValue(const std::string& path, const json& value, bool resetVoices) {
+    editPatch([&](json& root) {
+        json* o = &root; juce::StringArray parts; parts.addTokens(juce::String(path), ".", "");
+        for (int i = 0; i < parts.size(); i++) {
+            const std::string k = parts[i].toStdString(); const bool last = i == parts.size() - 1;
+            if (o->is_array() && parts[i].containsOnly("0123456789")) {
+                const size_t idx = (size_t)parts[i].getIntValue();
+                while (o->size() <= idx) o->push_back(json::object());
+                if (last) (*o)[idx] = value; else o = &(*o)[idx];
+            } else {
+                if (!o->is_object()) *o = json::object();
+                if (last) (*o)[k] = value; else o = &(*o)[k];
+            }
+        }
+    }, resetVoices);
 }
 
 void AetherProcessor::stepPreset(int delta, const std::vector<int>* within) {
@@ -123,7 +147,7 @@ void AetherProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     if ((int)bufL.size() < n) { bufL.resize((size_t)n); bufR.resize((size_t)n); sendL.resize((size_t)n); sendR.resize((size_t)n); }
     {
         const juce::SpinLock::ScopedTryLockType sl(pendLock);
-        if (sl.isLocked() && hasPending) { base = pending; hasPending = false; engine.setBundle(base, true); }
+        if (sl.isLocked() && hasPending) { base = pending; hasPending = false; engine.setBundle(base, pendingReset); }
     }
     // live patch = loaded patch + the performance controls
     aether::Patch live = base.p;
@@ -180,7 +204,7 @@ void AetherProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
 void AetherProcessor::getStateInformation(juce::MemoryBlock& destData) {
     auto state = apvts.copyState();
     { const juce::ScopedLock sl(infoLock); state.setProperty("patch", juce::String(curPatch.dump()), nullptr); }
-    state.setProperty("presetIndex", curIndex.load(), nullptr);
+    state.setProperty("presetIndex", curIndex.load(), nullptr); state.setProperty("edited", edited.load(), nullptr);
     if (auto xml = state.createXml()) copyXmlToBinary(*xml, destData);
 }
 
@@ -195,10 +219,10 @@ void AetherProcessor::setStateInformation(const void* data, int sizeInBytes) {
         int idx = (int)state.getProperty("presetIndex", 0);
         const auto& entries = Library::get().entries; const std::string name = aether::jstr(patch, "name", "");
         if (idx < 0 || idx >= (int)entries.size() || entries[(size_t)idx].name != name) { idx = -1; for (size_t i = 0; i < entries.size(); i++) if (entries[i].name == name) { idx = (int)i; break; } }
-        curIndex = idx;
+        curIndex = idx; edited = (bool)state.getProperty("edited", false); patchGen++;
         applyPatch(patch, false);
     }
-    state.removeProperty("patch", nullptr); state.removeProperty("presetIndex", nullptr);
+    state.removeProperty("patch", nullptr); state.removeProperty("presetIndex", nullptr); state.removeProperty("edited", nullptr);
     apvts.replaceState(state);
     sendChangeMessage();
 }

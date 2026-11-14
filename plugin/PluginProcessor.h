@@ -42,6 +42,12 @@ public:
     void loadPreset(int index);
     void stepPreset(int delta, const std::vector<int>* within = nullptr);
     int currentIndex() const { return curIndex.load(); }
+    // Sound editing (message thread). Paths are dotted, e.g. "L.0.f1c", "fx.dly.fb", "mods".
+    aether::json patchJson() const { const juce::ScopedLock sl(infoLock); return curPatch; }
+    void setPatchValue(const std::string& path, const aether::json& value, bool resetVoices = false);
+    void editPatch(const std::function<void(aether::json&)>& fn, bool resetVoices = false);
+    bool isEdited() const { return edited.load(); }
+    int patchGeneration() const { return patchGen.load(); }   // changes when a whole new patch is loaded
     struct Info { juce::String name, cat; juce::String macro[4]; juce::String layer[4]; bool layerOn[4] = { false, false, false, false }; };
     Info info() const { const juce::ScopedLock sl(infoLock); return curInfo; }
 
@@ -52,7 +58,7 @@ public:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
-    void applyPatch(const aether::json& patch, bool resetParams);
+    void applyPatch(const aether::json& patch, bool resetParams, bool resetVoices = true);
     void updateIR(const aether::Patch& p);
     void setParam(const char* id, float value);
 
@@ -60,7 +66,7 @@ private:
     aether::PostFX post;
     juce::dsp::Convolution conv;
     aether::Assets::Bundle base, pending;
-    bool hasPending = false; juce::SpinLock pendLock;
+    bool hasPending = false, pendingReset = true; juce::SpinLock pendLock; std::atomic<bool> edited{ false }; std::atomic<int> patchGen{ 0 };
     std::vector<float> bufL, bufR, sendL, sendR;
     double sr = 48000; int maxBlock = 512;
 

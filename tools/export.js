@@ -8,7 +8,7 @@ const out = path.join(__dirname, '..');
 const presets = LIB.list.map(p => D.normalizePatch(p));
 let maxMods = 0; for (const p of presets) maxMods = Math.max(maxMods, (p.mods || []).length);
 console.log('presets', presets.length, 'max mods', maxMods, 'cats', LIB.CATS.length);
-const lib = { version: 2, cats: LIB.CATS, presets };
+const lib = { version: 2, cats: LIB.CATS, defLayer: D.defLayer(1), presets };
 const txt = JSON.stringify(lib);
 fs.mkdirSync(out + '/resources', { recursive: true });
 fs.writeFileSync(out + '/resources/presets.json.gz', zlib.gzipSync(txt, { level: 9 }));

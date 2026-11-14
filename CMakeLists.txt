@@ -43,7 +43,7 @@ juce_add_plugin(Aether
 
 juce_add_binary_data(AetherData SOURCES resources/presets.json.gz)
 
-target_sources(Aether PRIVATE plugin/PluginProcessor.cpp plugin/PluginEditor.cpp)
+target_sources(Aether PRIVATE plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp)
 target_include_directories(Aether PRIVATE src third_party)
 target_compile_definitions(Aether PUBLIC
   JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
@@ -61,7 +61,7 @@ target_include_directories(aether_port_test PRIVATE src third_party)
 
 # Headless test of the real plugin processor.
 juce_add_console_app(aether_plugin_test)
-target_sources(aether_plugin_test PRIVATE tests/plugin_test.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp)
+target_sources(aether_plugin_test PRIVATE tests/plugin_test.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp)
 target_include_directories(aether_plugin_test PRIVATE src third_party)
 target_compile_definitions(aether_plugin_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JucePlugin_Name="Aether")
 target_link_libraries(aether_plugin_test PRIVATE AetherData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)

@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "EditPages.h"
 
 // ------------------------------------------------------------------ look
 AetherLook::AetherLook() {
@@ -44,7 +45,8 @@ void AetherLook::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h,
 }
 void AetherLook::drawButtonBackground(juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) {
     auto r = b.getLocalBounds().toFloat().reduced(0.5f);
-    g.setColour(down ? ui::accent.withAlpha(0.35f) : over ? ui::panel.brighter(0.12f) : ui::panel); g.fillRoundedRectangle(r, 6);
+    const bool on = b.getClickingTogglesState() && b.getToggleState();
+    g.setColour(on ? ui::accent.withAlpha(down ? 0.6f : 0.85f) : down ? ui::accent.withAlpha(0.35f) : over ? ui::panel.brighter(0.12f) : ui::panel); g.fillRoundedRectangle(r, 6);
     g.setColour(ui::line); g.drawRoundedRectangle(r, 6, 1);
 }
 
@@ -132,13 +134,38 @@ AetherEditor::AetherEditor(AetherProcessor& p)
     keys.setAvailableRange(24, 108); keys.setLowestVisibleKey(24);
     addAndMakeVisible(keys);
 
+    const char* tabNames[5] = { "Play", "Layers", "Mod", "FX", "Arp" };
+    for (int i = 0; i < 5; i++) {
+        pageTabs[i].setButtonText(tabNames[i]);
+        pageTabs[i].onClick = [this, i] { showPage(i); };
+        addAndMakeVisible(pageTabs[i]);
+    }
+    pages[0] = std::make_unique<edit::LayersPage>(p); pages[1] = std::make_unique<edit::ModPage>(p);
+    pages[2] = std::make_unique<edit::FxPage>(p); pages[3] = std::make_unique<edit::ArpPage>(p);
+    for (int i = 0; i < 4; i++) { scrollers[i] = std::make_unique<edit::Scroller>(*pages[i]); addChildComponent(*scrollers[i]); }
+    lastGen = p.patchGeneration();
     p.addChangeListener(this);
     refilter(); refreshInfo();
-    setResizable(true, true); setResizeLimits(860, 560, 1600, 1100);
-    setSize(1040, 660);
+    showPage(0);
+    setResizable(true, true); setResizeLimits(900, 600, 1800, 1200);
+    setSize(1120, 720);
     startTimerHz(10);
 }
-AetherEditor::~AetherEditor() { proc.removeChangeListener(this); setLookAndFeel(nullptr); }
+AetherEditor::~AetherEditor() { proc.removeChangeListener(this); for (auto& s : scrollers) s.reset(); for (auto& pg : pages) pg.reset(); setLookAndFeel(nullptr); }
+
+void AetherEditor::showPage(int i) {
+    page = i;
+    const bool play = i == 0;
+    for (juce::Component* c : { (juce::Component*)&secMacro, (juce::Component*)&secPerf, (juce::Component*)&secLayers, (juce::Component*)&secOrb, (juce::Component*)&orb, (juce::Component*)volume.get() }) c->setVisible(play);
+    for (auto& k : macros) k->setVisible(play); for (auto& k : perf) k->setVisible(play); for (auto& k : layers) k->setVisible(play);
+    for (int k = 0; k < 4; k++) scrollers[k]->setVisible(i == k + 1);
+    if (!play) { pages[i - 1]->rebuild(); }
+    for (int k = 0; k < 5; k++) {
+        pageTabs[k].setColour(juce::TextButton::buttonColourId, k == i ? ui::accent.withAlpha(0.35f) : ui::panel);
+        pageTabs[k].setColour(juce::TextButton::textColourOffId, k == i ? ui::text : ui::dim);
+    }
+    resized();
+}
 
 void AetherEditor::refilter() {
     const auto& lib = Library::get();
@@ -159,7 +186,8 @@ void AetherEditor::refilter() {
 }
 void AetherEditor::refreshInfo() {
     const auto inf = proc.info();
-    nameLabel.setText(inf.name, juce::dontSendNotification);
+    nameLabel.setText(inf.name + (proc.isEdited() ? "  (edited)" : ""), juce::dontSendNotification);
+    if (proc.patchGeneration() != lastGen) { lastGen = proc.patchGeneration(); if (page > 0) pages[page - 1]->rebuild(); }
     catLabel.setText(inf.cat.toUpperCase(), juce::dontSendNotification);
     for (int i = 0; i < 4; i++) {
         macros[i]->label.setText(inf.macro[i], juce::dontSendNotification);
@@ -210,7 +238,14 @@ void AetherEditor::resized() {
         catLabel.setBounds(head.removeFromTop(20)); nameLabel.setBounds(head.removeFromTop(36));
     }
     statusLabel.setBounds(getLocalBounds().reduced(14).removeFromTop(24));
-    r.removeFromTop(8);
+    {
+        auto tabs = r.removeFromTop(30);
+        for (auto& t : pageTabs) { t.setBounds(tabs.removeFromLeft(78)); tabs.removeFromLeft(6); }
+    }
+    r.removeFromTop(10);
+    centre = r;
+    for (auto& s : scrollers) if (s) s->setBounds(r);
+    if (page != 0) return;
     const int rowH = juce::jlimit(84, 120, (r.getHeight() - 60) / 3);
     auto knobRow = [](juce::Rectangle<int> area, std::unique_ptr<Knob>* ks, int n) { const int w = area.getWidth() / n; for (int i = 0; i < n; i++) ks[i]->setBounds(area.removeFromLeft(w).reduced(4, 0)); };
     auto orbArea = r.removeFromRight(juce::jmin(r.getWidth() * 38 / 100, rowH * 3 + 20));

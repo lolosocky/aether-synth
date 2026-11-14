@@ -1,6 +1,8 @@
 #pragma once
 #include "PluginProcessor.h"
 
+namespace edit { class Page; class Scroller; }
+
 namespace ui {
 const juce::Colour bg{ 0xff0d0f14 }, panel{ 0xff161a22 }, line{ 0xff262c38 }, text{ 0xffe8ebf2 }, dim{ 0xff8a93a6 }, accent{ 0xff7c9cff }, accent2{ 0xffc58bff };
 }
@@ -51,6 +53,8 @@ private:
     void selectedRowsChanged(int) override {}
     void refilter();
     void refreshInfo();
+    void showPage(int i);
+    void layoutPlay(juce::Rectangle<int> r);
 
     AetherProcessor& proc;
     AetherLook look;
@@ -65,5 +69,10 @@ private:
     juce::Label secMacro, secPerf, secLayers, secOrb;
     juce::MidiKeyboardComponent keys;
     juce::Random random;
+    juce::TextButton pageTabs[5];
+    std::unique_ptr<edit::Page> pages[4];
+    std::unique_ptr<edit::Scroller> scrollers[4];
+    int page = 0, lastGen = -1;
+    juce::Rectangle<int> centre;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AetherEditor)
 };

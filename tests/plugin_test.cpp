@@ -46,9 +46,21 @@ int main() {
     std::cout << "state: " << state.getSize() << " bytes | restored '" << q.info().name << "' idx " << q.currentIndex() << " (want '" << lib.entries[42].name << "' 42) | mac2 "
               << q.apvts.getParameter("mac2")->getValue() << " cutoff " << q.apvts.getRawParameterValue("cutoff")->load() << "\n";
     const bool ok = q.info().name.toStdString() == lib.entries[42].name && q.currentIndex() == 42 && std::abs(q.apvts.getParameter("mac2")->getValue() - 0.73f) < 1e-3;
+    // sound editing: switch layer A of a preset to a different engine and filter, check the sound changes and the edit is saved
+    p.loadPreset(5);
+    const auto [r0, pk0, n0] = run(1.0, { 60 }, { 60 }); run(0.5, {}, {});
+    p.setPatchValue("L.0.mode", "modal", true); p.setPatchValue("L.0.mdl", "Glock"); p.setPatchValue("L.0.f1c", 0.3);
+    run(0.05, {}, {});
+    const auto [r1, pk1, n1] = run(1.0, { 60 }, { 60 }); run(0.5, {}, {});
+    juce::MemoryBlock st2; p.getStateInformation(st2);
+    std::unique_ptr<juce::AudioProcessor> third(createPluginFilter()); auto& t = dynamic_cast<AetherProcessor&>(*third);
+    t.setStateInformation(st2.getData(), (int)st2.getSize());
+    const auto tj = t.patchJson();
+    const bool editOk = std::abs(r1 - r0) > 0.5 && !n1 && tj["L"][0]["mode"] == "modal" && tj["L"][0]["mdl"] == "Glock" && t.isEdited();
+    std::cout << "edit: rms " << r0 << " -> " << r1 << " | restored mode " << tj["L"][0]["mode"] << " model " << tj["L"][0]["mdl"] << " edited " << t.isEdited() << (editOk ? " OK" : " FAIL") << "\n";
     // sample-rate change
     p.prepareToPlay(96000, 128); buf.setSize(2, 512); p.loadPreset(10);
     const auto [r96, pk96, nan96] = run(1.0, { 60 }, { 60 });
     std::cout << "96k: rms " << r96 << " nan " << nan96 << "\n";
-    return (fails || !ok || nan96) ? 1 : 0;
+    return (fails || !ok || nan96 || !editOk) ? 1 : 0;
 }

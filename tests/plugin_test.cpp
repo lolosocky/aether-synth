@@ -58,9 +58,30 @@ int main() {
     const auto tj = t.patchJson();
     const bool editOk = std::abs(r1 - r0) > 0.5 && !n1 && tj["L"][0]["mode"] == "modal" && tj["L"][0]["mdl"] == "Glock" && t.isEdited();
     std::cout << "edit: rms " << r0 << " -> " << r1 << " | restored mode " << tj["L"][0]["mode"] << " model " << tj["L"][0]["mdl"] << " edited " << t.isEdited() << (editOk ? " OK" : " FAIL") << "\n";
+    // Song Sections: verse vs hook on the same preset should differ, and a full arrangement must stay clean
+    p.loadPreset(3);
+    auto setP = [&p](const char* id, float v) { auto* q = p.apvts.getParameter(id); q->setValueNotifyingHost(q->convertTo0to1(v)); };
+    setP("secon", 1); setP("morph", 0);
+    setP("section", 1); run(0.3, {}, {}); const auto [rv, pv, nv] = run(1.0, { 48, 55, 60, 63 }, { 48, 55, 60, 63 }); run(1.0, {}, {});
+    setP("section", 2); run(0.3, {}, {}); const auto [rh, ph2, nh] = run(1.0, { 48, 55, 60, 63 }, { 48, 55, 60, 63 }); run(1.0, {}, {});
+    setP("section", 0); run(0.3, {}, {}); const auto [ri, pi2, ni] = run(1.0, { 48, 55, 60, 63 }, { 48, 55, 60, 63 }); run(1.0, {}, {});
+    const bool secOk = !nv && !nh && !ni && rh > rv && rh > ri && p.sectionNow.load() == 0.0f;
+    std::cout << "sections: intro " << ri << " dB, verse " << rv << " dB, hook " << rh << " dB" << (secOk ? " OK" : " FAIL") << "\n";
+    setP("secon", 0);
+    // Crate Mode: press a loop, then play chops on the pad keys and the synth above them
+    p.loadPreset(1100);
+    p.setPatchValue("crate.on", 1); p.setPatchValue("crate.prog", 1); p.setPatchValue("crate.age", 0.7);
+    p.pumpCrate(true);
+    for (int i = 0; i < 400 && p.crateSnapshot() == nullptr; i++) juce::Thread::sleep(20);
+    auto cb = p.crateSnapshot();
+    run(0.05, {}, {});
+    const auto [rc, pc, nc] = run(1.0, { 48, 52 }, { 48, 52 }); run(0.5, {}, {});
+    const auto [rs, ps2, ns] = run(1.0, { 72 }, { 72 }); run(0.5, {}, {});
+    const bool crateOk = cb && cb->len > 44100 && cb->chops == 16 && !nc && rc > -45 && !ns && rs > -60;
+    std::cout << "crate: " << (cb ? cb->len : 0) << " samples, " << (cb ? cb->chops : 0) << " chops, '" << p.crateStatus() << "' | chops " << rc << " dB, synth key " << rs << " dB" << (crateOk ? " OK" : " FAIL") << "\n";
     // sample-rate change
     p.prepareToPlay(96000, 128); buf.setSize(2, 512); p.loadPreset(10);
     const auto [r96, pk96, nan96] = run(1.0, { 60 }, { 60 });
     std::cout << "96k: rms " << r96 << " nan " << nan96 << "\n";
-    return (fails || !ok || nan96 || !editOk) ? 1 : 0;
+    return (fails || !ok || nan96 || !editOk || !secOk || !crateOk) ? 1 : 0;
 }

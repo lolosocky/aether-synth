@@ -69,9 +69,10 @@ private:
     juce::Label secMacro, secPerf, secLayers, secOrb;
     juce::MidiKeyboardComponent keys;
     juce::Random random;
-    juce::TextButton pageTabs[5];
-    std::unique_ptr<edit::Page> pages[4];
-    std::unique_ptr<edit::Scroller> scrollers[4];
+    static constexpr int kPages = 6;
+    juce::TextButton pageTabs[kPages + 1];
+    std::unique_ptr<edit::Page> pages[kPages];
+    std::unique_ptr<edit::Scroller> scrollers[kPages];
     int page = 0, lastGen = -1;
     juce::Rectangle<int> centre;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AetherEditor)

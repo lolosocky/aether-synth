@@ -22,7 +22,7 @@ public:
     Control& host(const char* paramId);
     void load(const aether::json& patch);
     void resized() override;
-    int prefWidth() const { return kind == Kind::knob ? 70 : kind == Kind::menu ? 150 : 118; }
+    int prefWidth() const { return kind == Kind::knob ? 70 : kind == Kind::menu ? 150 : juce::jmax(100, text.length() * 8 + 34); }
     int prefHeight() const { return kind == Kind::knob ? 84 : kind == Kind::menu ? 46 : 30; }
 private:
     void push(const aether::json& v);
@@ -91,6 +91,30 @@ class ArpPage : public Page {
 public:
     explicit ArpPage(AetherProcessor& p) : Page(p) { rebuild(); }
     void rebuild() override;
+};
+
+class SectionsPage : public Page, private juce::Timer {
+public:
+    explicit SectionsPage(AetherProcessor& p) : Page(p) { rebuild(); startTimerHz(15); }
+    ~SectionsPage() override { stopTimer(); }
+    void rebuild() override;
+private:
+    void timerCallback() override;
+    juce::TextButton* secBtn[4] = {};
+    juce::Label* nowLabel = nullptr;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> batt;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> catt;
+};
+
+class CratePage : public Page, private juce::Timer {
+public:
+    explicit CratePage(AetherProcessor& p) : Page(p) { rebuild(); startTimerHz(20); }
+    ~CratePage() override { stopTimer(); }
+    void rebuild() override;
+private:
+    void timerCallback() override;
+    juce::Label* status = nullptr;
+    juce::Component* view = nullptr;
 };
 
 // Scrolling wrapper so long pages work at any window size.

@@ -131,18 +131,19 @@ AetherEditor::AetherEditor(AetherProcessor& p)
     keys.setColour(juce::MidiKeyboardComponent::keySeparatorLineColourId, ui::line);
     keys.setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, ui::accent.withAlpha(0.6f));
     keys.setColour(juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, ui::accent.withAlpha(0.2f));
-    keys.setAvailableRange(24, 108); keys.setLowestVisibleKey(24);
+    keys.setAvailableRange(24, 108); keys.setOctaveForMiddleC(5); keys.setLowestVisibleKey(24);
     addAndMakeVisible(keys);
 
-    const char* tabNames[5] = { "Play", "Layers", "Mod", "FX", "Arp" };
-    for (int i = 0; i < 5; i++) {
+    const char* tabNames[kPages + 1] = { "Play", "Layers", "Mod", "FX", "Arp", "Sections", "Crate" };
+    for (int i = 0; i <= kPages; i++) {
         pageTabs[i].setButtonText(tabNames[i]);
         pageTabs[i].onClick = [this, i] { showPage(i); };
         addAndMakeVisible(pageTabs[i]);
     }
     pages[0] = std::make_unique<edit::LayersPage>(p); pages[1] = std::make_unique<edit::ModPage>(p);
     pages[2] = std::make_unique<edit::FxPage>(p); pages[3] = std::make_unique<edit::ArpPage>(p);
-    for (int i = 0; i < 4; i++) { scrollers[i] = std::make_unique<edit::Scroller>(*pages[i]); addChildComponent(*scrollers[i]); }
+    pages[4] = std::make_unique<edit::SectionsPage>(p); pages[5] = std::make_unique<edit::CratePage>(p);
+    for (int i = 0; i < kPages; i++) { scrollers[i] = std::make_unique<edit::Scroller>(*pages[i]); addChildComponent(*scrollers[i]); }
     lastGen = p.patchGeneration();
     p.addChangeListener(this);
     refilter(); refreshInfo();
@@ -158,9 +159,9 @@ void AetherEditor::showPage(int i) {
     const bool play = i == 0;
     for (juce::Component* c : { (juce::Component*)&secMacro, (juce::Component*)&secPerf, (juce::Component*)&secLayers, (juce::Component*)&secOrb, (juce::Component*)&orb, (juce::Component*)volume.get() }) c->setVisible(play);
     for (auto& k : macros) k->setVisible(play); for (auto& k : perf) k->setVisible(play); for (auto& k : layers) k->setVisible(play);
-    for (int k = 0; k < 4; k++) scrollers[k]->setVisible(i == k + 1);
+    for (int k = 0; k < kPages; k++) scrollers[k]->setVisible(i == k + 1);
     if (!play) { pages[i - 1]->rebuild(); }
-    for (int k = 0; k < 5; k++) {
+    for (int k = 0; k <= kPages; k++) {
         pageTabs[k].setColour(juce::TextButton::buttonColourId, k == i ? ui::accent.withAlpha(0.35f) : ui::panel);
         pageTabs[k].setColour(juce::TextButton::textColourOffId, k == i ? ui::text : ui::dim);
     }
@@ -240,7 +241,8 @@ void AetherEditor::resized() {
     statusLabel.setBounds(getLocalBounds().reduced(14).removeFromTop(24));
     {
         auto tabs = r.removeFromTop(30);
-        for (auto& t : pageTabs) { t.setBounds(tabs.removeFromLeft(78)); tabs.removeFromLeft(6); }
+        const int tw = juce::jmin(84, (tabs.getWidth() - 6 * kPages) / (kPages + 1));
+        for (auto& t : pageTabs) { t.setBounds(tabs.removeFromLeft(tw)); tabs.removeFromLeft(6); }
     }
     r.removeFromTop(10);
     centre = r;

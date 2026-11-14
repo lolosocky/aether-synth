@@ -223,7 +223,7 @@ void LayersPage::rebuild() {
     }
     const aether::Layer& L = P.L[layer];
     const std::string b = "L." + std::to_string(layer) + ".";
-    auto re = [this] { juce::MessageManager::callAsync([sp = juce::Component::SafePointer<LayersPage>(this)] { if (sp) sp->rebuild(); }); };
+    auto re = [sp = juce::Component::SafePointer<LayersPage>(this)] { juce::MessageManager::callAsync([sp] { if (auto* pg = sp.getComponent()) pg->rebuild(); }); };
 
     { auto& s = section("Layer " + juce::String::charToString((juce::juce_wchar)('A' + layer)));
       toggle(b + "on", "Layer on").onEdit(re);
@@ -329,7 +329,7 @@ private:
 void ModPage::rebuild() {
     clear();
     const json pj = proc.patchJson();
-    auto re = [this] { juce::MessageManager::callAsync([sp = juce::Component::SafePointer<ModPage>(this)] { if (sp) sp->rebuild(); }); };
+    auto re = [sp = juce::Component::SafePointer<ModPage>(this)] { juce::MessageManager::callAsync([sp] { if (auto* pg = sp.getComponent()) pg->rebuild(); }); };
     const juce::StringArray shapes{ "Sine", "Triangle", "Ramp Up", "Ramp Down", "Square", "Sample & Hold", "Smooth Random" };
     for (int i = 0; i < 4; i++) {
         const std::string b = "lfo." + std::to_string(i) + ".";
@@ -382,7 +382,7 @@ void ModPage::rebuild() {
 void FxPage::rebuild() {
     clear();
     const json pj = proc.patchJson();
-    auto re = [this] { juce::MessageManager::callAsync([sp = juce::Component::SafePointer<FxPage>(this)] { if (sp) sp->rebuild(); }); };
+    auto re = [sp = juce::Component::SafePointer<FxPage>(this)] { juce::MessageManager::callAsync([sp] { if (auto* pg = sp.getComponent()) pg->rebuild(); }); };
     auto onSwitch = [this](Section& s, const std::string& path) { auto& t = *controls.emplace_back(std::make_unique<Control>(proc, Control::Kind::toggle, path, "On")); addAndMakeVisible(t); s.header = &t; t.getProperties().set("w", 60); };
     { auto& s = section("Drive"); onSwitch(s, "fx.drv.on");
       menu("fx.drv.type", "Type", { "Soft", "Tube", "Hard Clip", "Fuzz", "Wavefold" }, false);
@@ -456,6 +456,153 @@ void ArpPage::rebuild() {
     if (auto* sc = findParentComponentOfClass<Scroller>()) sc->relayout(); else resized();
     repaint();
     (void)pj;
+}
+
+} // namespace edit
+
+namespace edit {
+
+// ------------------------------------------------------------------ song sections
+void SectionsPage::rebuild() {
+    clear(); batt.clear(); catt.clear();
+    for (auto& b : secBtn) b = nullptr;
+    const json pj = proc.patchJson();
+    {
+        auto& s = section("Song Sections");
+        auto& on = own(std::make_unique<juce::ToggleButton>("Sections on"));
+        on.setColour(juce::ToggleButton::textColourId, ui::text); on.setColour(juce::ToggleButton::tickColourId, ui::accent);
+        batt.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(proc.apvts, "secon", on));
+        on.getProperties().set("w", 130); on.getProperties().set("h", 30); s.items.push_back(&on);
+        for (int i = 0; i < 4; i++) {
+            auto& b = own(std::make_unique<juce::TextButton>(aether::sectionName(i)));
+            b.onClick = [this, i] { auto* prm = proc.apvts.getParameter("section"); prm->beginChangeGesture(); prm->setValueNotifyingHost(prm->convertTo0to1((float)i)); prm->endChangeGesture();
+                                    if (auto* o = proc.apvts.getParameter("secon")) if (o->getValue() < 0.5f) o->setValueNotifyingHost(1.0f); };
+            b.getProperties().set("w", 84); b.getProperties().set("h", 32); s.items.push_back(&b); secBtn[i] = &b;
+        }
+        auto& now = own(std::make_unique<juce::Label>()); now.setColour(juce::Label::textColourId, ui::dim); now.setFont(juce::FontOptions(12.0f));
+        now.getProperties().set("w", 200); now.getProperties().set("h", 32); s.items.push_back(&now); nowLabel = &now;
+    }
+    {
+        auto& s = section("Follow Your Song");
+        auto& fol = own(std::make_unique<juce::ToggleButton>("Follow FL playback"));
+        fol.setColour(juce::ToggleButton::textColourId, ui::text); fol.setColour(juce::ToggleButton::tickColourId, ui::accent);
+        batt.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(proc.apvts, "follow", fol));
+        fol.getProperties().set("w", 170); fol.getProperties().set("h", 30); s.items.push_back(&fol);
+        auto& morph = own(std::make_unique<juce::ComboBox>());
+        morph.addItemList({ "Instant", "1 beat", "2 beats", "1 bar", "2 bars" }, 1);
+        catt.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(proc.apvts, "morph", morph));
+        morph.getProperties().set("w", 110); morph.getProperties().set("h", 30); s.items.push_back(&morph);
+        auto& arr = own(std::make_unique<juce::TextEditor>());
+        arr.setText(proc.arrangementText(), false); arr.setIndents(8, 0); arr.setJustification(juce::Justification::centredLeft);
+        arr.onReturnKey = arr.onFocusLost = [this, &arr] { proc.setArrangement(arr.getText()); };
+        arr.getProperties().set("w", 300); arr.getProperties().set("h", 30); s.items.push_back(&arr);
+        auto& tmpl = own(std::make_unique<juce::ComboBox>());
+        const juce::StringArray names{ "Rap song (3 verses)", "Two verses", "Hook first", "Beat tape loop", "Short single" };
+        const juce::StringArray maps{ "I8 V16 H8 V16 H8 V16 H8 O8", "I8 V16 H8 V16 H8 O8", "H8 V16 H8 V16 H8 O8", "I4 V8 H8", "I4 V16 H8 V8 H8 O4" };
+        tmpl.addItemList(names, 1); tmpl.setTextWhenNothingSelected("Templates");
+        tmpl.onChange = [this, &tmpl, &arr, maps] { const int i = tmpl.getSelectedItemIndex(); if (i >= 0) { arr.setText(maps[i], false); proc.setArrangement(maps[i]); } };
+        tmpl.getProperties().set("w", 170); tmpl.getProperties().set("h", 30); s.items.push_back(&tmpl);
+        auto& hint = own(std::make_unique<juce::Label>());
+        hint.setText("I = intro, V = verse, H = hook, O = outro, then bars. After the map ends, the last verse and hook keep alternating.", juce::dontSendNotification);
+        hint.setFont(juce::FontOptions(11.5f)); hint.setColour(juce::Label::textColourId, ui::dim);
+        hint.getProperties().set("w", 640); hint.getProperties().set("h", 22); s.items.push_back(&hint);
+    }
+    static const char* blurb[4] = { "Intro", "Verse (leaves room for vocals)", "Hook", "Outro" };
+    for (int i = 0; i < 4; i++) {
+        const std::string b = "sec." + std::to_string(i) + ".";
+        section(blurb[i]);
+        knob(b + "cut", "Filter", -0.5, 0.5, Curve::lin, 0, Fmt::bip); knob(b + "res", "Reso", -0.3, 0.3, Curve::lin, 0, Fmt::bip);
+        knob(b + "rev", "Reverb", -0.4, 0.4, Curve::lin, 0, Fmt::bip); knob(b + "dly", "Delay", -0.4, 0.4, Curve::lin, 0, Fmt::bip);
+        knob(b + "wid", "Width", 0, 2, Curve::lin, 1, Fmt::pct); knob(b + "pocket", "Vocal Pocket", 0, 1, Curve::lin, 0, Fmt::pct);
+        knob(b + "drive", "Drive", 0, 0.6, Curve::lin, 0, Fmt::pct); knob(b + "rel", "Release", 0.25, 4, Curve::expo, 1, Fmt::ratio);
+        knob(b + "gain", "Level", -12, 6, Curve::lin, 0, Fmt::db);
+        for (int l = 0; l < 4; l++) knob(b + "lvl." + std::to_string(l), juce::String("Layer ") + juce::String::charToString((juce::juce_wchar)('A' + l)), 0, 1.5, Curve::lin, 1, Fmt::pct);
+    }
+    refresh();
+    if (auto* sc = findParentComponentOfClass<Scroller>()) sc->relayout(); else resized();
+    repaint();
+    (void)pj;
+}
+void SectionsPage::timerCallback() {
+    const float now = proc.sectionNow.load();
+    const float sel = proc.apvts.getRawParameterValue("section")->load();
+    for (int i = 0; i < 4; i++) if (secBtn[i]) {
+        const bool cur = now >= 0 ? std::abs(now - (float)i) < 0.5f : std::abs(sel - (float)i) < 0.5f;
+        secBtn[i]->setColour(juce::TextButton::buttonColourId, cur ? (now >= 0 ? ui::accent.withAlpha(0.6f) : ui::accent.withAlpha(0.25f)) : ui::panel);
+    }
+    if (nowLabel) nowLabel->setText(now < 0 ? juce::String("Off: the preset plays as designed") : "Playing: " + juce::String(aether::sectionName(juce::roundToInt(now))) + (std::abs(now - std::round(now)) > 0.02f ? " (morphing)" : ""), juce::dontSendNotification);
+}
+
+// ------------------------------------------------------------------ crate mode
+namespace {
+class CrateView : public juce::Component {
+public:
+    explicit CrateView(AetherProcessor& p) : proc(p) {}
+    void paint(juce::Graphics& g) override {
+        auto r = getLocalBounds().toFloat();
+        g.setColour(ui::bg); g.fillRoundedRectangle(r, 6);
+        auto buf = proc.crateSnapshot();
+        if (!buf || buf->len <= 0) { g.setColour(ui::dim); g.setFont(juce::FontOptions(13.0f)); g.drawText("Turn Crate Mode on to press this preset into a loop.", r, juce::Justification::centred); return; }
+        const int W = juce::jmax(1, (int)r.getWidth()); const float mid = r.getCentreY(), hh = r.getHeight() * 0.45f;
+        const int hit = proc.crateHit.load();
+        for (int c = 0; c < buf->chops; c++) {
+            const float x0 = r.getX() + r.getWidth() * buf->starts[(size_t)c] / buf->len, x1 = r.getX() + r.getWidth() * buf->starts[(size_t)c + 1] / buf->len;
+            if (c == hit) { g.setColour(ui::accent.withAlpha(0.18f)); g.fillRect(x0, r.getY(), x1 - x0, r.getHeight()); }
+            g.setColour(ui::line); g.drawVerticalLine((int)x0, r.getY(), r.getBottom());
+            g.setColour(ui::dim); g.setFont(juce::FontOptions(10.0f)); g.drawText(juce::String(c + 1), (int)x0 + 3, (int)r.getY() + 2, 20, 12, juce::Justification::left);
+        }
+        g.setColour(ui::accent2.withAlpha(0.85f));
+        for (int x = 0; x < W; x++) {
+            const int a = (int)((long long)buf->len * x / W), b = juce::jmax(a + 1, (int)((long long)buf->len * (x + 1) / W));
+            float pk = 0; for (int i = a; i < b && i < buf->len; i += 4) pk = juce::jmax(pk, std::abs(buf->L[(size_t)i]), std::abs(buf->R[(size_t)i]));
+            g.drawVerticalLine((int)r.getX() + x, mid - pk * hh * 1.6f, mid + pk * hh * 1.6f);
+        }
+    }
+    AetherProcessor& proc;
+};
+}
+
+void CratePage::rebuild() {
+    clear(); status = nullptr; view = nullptr;
+    {
+        auto& s = section("Crate Mode");
+        toggle("crate.on", "Crate Mode on");
+        juce::StringArray progs; for (auto& p : aether::crateProgs()) progs.add(p.name);
+        menu("crate.prog", "Progression", progs, false);
+        menu("crate.key", "Key", { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" }, false);
+        menu("crate.rhythm", "Rhythm", { "Held", "Stabs", "Pushes", "Half-time" }, false);
+        menu("crate.chops", "Chops", { "16 chops", "8 chops" }, false, { "16", "8" });
+        knob("crate.age", "Record Age", 0, 1, Curve::lin, 0.5, Fmt::pct);
+        auto& re = own(std::make_unique<juce::TextButton>("Re-press"));
+        re.onClick = [this] { proc.repressCrate(); };
+        re.getProperties().set("w", 100); re.getProperties().set("h", 30); s.items.push_back(&re);
+    }
+    {
+        auto& s = section("The Record");
+        auto& v = own(std::make_unique<CrateView>(proc)); v.getProperties().set("w", 680); v.getProperties().set("h", 120); s.items.push_back(&v); view = &v;
+        auto& st = own(std::make_unique<juce::Label>()); st.setColour(juce::Label::textColourId, ui::text); st.setFont(juce::FontOptions(13.0f));
+        st.getProperties().set("w", 680); st.getProperties().set("h", 22); s.items.push_back(&st); status = &st;
+    }
+    {
+        section("Playing the Chops");
+        menu("crate.base", "First chop on", { "C2", "C3", "C4", "C5" }, false, { "24", "36", "48", "60" });
+        knob("crate.pitch", "Pitch", -12, 12, Curve::integer, 0, Fmt::st);
+        toggle("crate.choke", "Choke (one at a time)"); toggle("crate.oneshot", "Play whole chop");
+        auto& hint = own(std::make_unique<juce::Label>());
+        hint.setText("Chops sit on consecutive keys from the first-chop key. Every other key still plays the synth, so you can play over your flip.", juce::dontSendNotification);
+        hint.setFont(juce::FontOptions(11.5f)); hint.setColour(juce::Label::textColourId, ui::dim);
+        hint.getProperties().set("w", 640); hint.getProperties().set("h", 22); sections.back().items.push_back(&hint);
+    }
+    // show sensible values for presets that have never used Crate Mode
+    const json pj = proc.patchJson();
+    refresh();
+    if (!pj.contains("crate")) for (auto& c : controls) c->load(json{ { "crate", { { "on", 0 }, { "prog", 0 }, { "key", 0 }, { "rhythm", 0 }, { "chops", 16 }, { "age", 0.5 }, { "base", 48 }, { "pitch", 0 }, { "choke", 1 }, { "oneshot", 1 } } } });
+    if (auto* sc = findParentComponentOfClass<Scroller>()) sc->relayout(); else resized();
+    repaint();
+}
+void CratePage::timerCallback() {
+    if (status) status->setText(proc.crateStatus(), juce::dontSendNotification);
+    if (view) view->repaint();
 }
 
 } // namespace edit

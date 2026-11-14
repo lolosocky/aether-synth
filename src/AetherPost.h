@@ -101,10 +101,17 @@ public:
         eqL.reset(); eqM.reset(); eqH.reset(); lp.reset(); hp.reset(); rlc.reset(); comp.gr = 0; lim.gr = 0; fbL = fbR = 0; dw = pw = 0;
     }
     // Stage 1: EQ and delay in place; writes the pre-delayed reverb send. fxm = engine's effect modulation offsets.
-    void stage1(const Patch& P, const double* fxm, double bpm, float* L, float* R, float* sendL, float* sendR, int n) {
+    void stage1(const Patch& P, const double* fxm, double bpm, float* L, float* R, float* sendL, float* sendR, int n, double pocket = 0) {
         const auto& F = P.fx; const double k = first ? 1 : 1 - std::exp(-n / (0.025 * sr));
         const double lo = F.eq.on ? clampd(F.eq.low + fxm[8] * 12, -18, 18) : 0, mi = F.eq.on ? clampd(F.eq.mid, -18, 18) : 0, hi = F.eq.on ? clampd(F.eq.high + fxm[9] * 12, -18, 18) : 0;
         sLo += (lo - sLo) * k; sMi += (mi - sMi) * k; sHi += (hi - sHi) * k; sMf += (clampd(F.eq.mf, 100, 12000) - sMf) * k;
+        // vocal pocket (Song Sections): a broad dip where a voice sits, plus a little less upper-mid presence
+        sPocket += (clampd(pocket, 0, 1) - sPocket) * k;
+        if (sPocket > 0.003) {
+            pk1.peak(2600, 0.75, -7.5 * sPocket, sr); pk2.peak(900, 1.1, -2.5 * sPocket, sr);
+            for (int i = 0; i < n; i++) { L[i] = (float)pk2.tick(pk1.tick(L[i], 0), 0); R[i] = (float)pk2.tick(pk1.tick(R[i], 1), 1); }
+            pk1.flush(); pk2.flush();
+        } else if (sPocket > 0) { pk1.reset(); pk2.reset(); sPocket = 0; }
         const bool eqActive = std::abs(sLo) > 0.01 || std::abs(sMi) > 0.01 || std::abs(sHi) > 0.01;
         if (eqActive) {
             eqL.lowShelf(120, sLo, sr); eqM.peak(sMf, 0.8, sMi, sr); eqH.highShelf(7000, sHi, sr);
@@ -180,7 +187,7 @@ public:
     static inline double clip(double x) { const double a = std::abs(x); if (a < 0.85) return x; const double y = 0.85 + 0.15 * std::tanh((std::min(a, 2.0) - 0.85) / 0.15); return x < 0 ? -y : y; }
     double sr = 48000;
 private:
-    Biquad eqL, eqM, eqH, lp, hp, rlc; Dyn comp, lim;
+    Biquad eqL, eqM, eqH, lp, hp, rlc, pk1, pk2; Dyn comp, lim; double sPocket = 0;
     std::vector<float> dbuf[2], pbuf[2]; int dlen = 1, plen = 1, dw = 0, pw = 0; bool first = true, dclear = true;
     double fbL = 0, fbR = 0, lfo = 0;
     double sLo = 0, sMi = 0, sHi = 0, sMf = 1000, sMix = 0, sFb = 0.35, sPP = 1, sTime = 0.35, sHc = 5000, sLc = 250, sMod = 0, sWet = 0, sDry = 1, sCg = 1, sW = 1, sMaster = 0.8;

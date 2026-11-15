@@ -1,5 +1,6 @@
 #include "Hardware.h"
 #include "BinaryData.h"
+#include <map>
 
 namespace ui {
 
@@ -11,22 +12,127 @@ const juce::Typeface::Ptr& typeface(int which) {
     return faces[juce::jlimit(0, 2, which)];
 }
 
+static float hashf(uint32_t x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return (x & 0xffffff) / 16777215.0f; }
+
+const juce::Image& anodizedTile() {
+    static const juce::Image img = [] {
+        const int N = 256; juce::Image im(juce::Image::RGB, N, N, false);
+        juce::Image::BitmapData bd(im, juce::Image::BitmapData::writeOnly);
+        for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) {
+            // fine grain plus a faint horizontal brushing, all periodic so the tile repeats
+            const float grain = hashf((uint32_t)(x * 7919 + y * 104729)) - 0.5f;
+            const float row = hashf((uint32_t)(y * 2654435761u)) - 0.5f;
+            const float v = 38.0f + grain * 7.0f + row * 4.0f;
+            bd.setPixelColour(x, y, juce::Colour::fromRGB((juce::uint8)juce::jlimit(0.0f, 255.0f, v), (juce::uint8)juce::jlimit(0.0f, 255.0f, v + 2), (juce::uint8)juce::jlimit(0.0f, 255.0f, v + 5)));
+        }
+        return im;
+    }();
+    return img;
+}
+
+juce::Image brushed(int w, int h, juce::Colour base) {
+    w = juce::jmax(1, w); h = juce::jmax(1, h);
+    juce::Image im(juce::Image::RGB, w, h, false);
+    juce::Image::BitmapData bd(im, juce::Image::BitmapData::writeOnly);
+    std::vector<float> row((size_t)w);
+    for (int y = 0; y < h; y++) {
+        // long horizontal streaks: random walk along the row, smoothed
+        float acc = 0, sm = 0;
+        for (int x = 0; x < w; x++) { acc = acc * 0.985f + (hashf((uint32_t)(y * 92821 + x * 31)) - 0.5f) * 0.35f; sm += (acc - sm) * 0.2f; row[(size_t)x] = sm; }
+        const float rowTone = (hashf((uint32_t)(y * 15485863u)) - 0.5f) * 0.05f;
+        for (int x = 0; x < w; x++) {
+            const float sheen = 0.06f * std::sin(juce::MathConstants<float>::pi * (float)x / (float)w * 1.0f);   // soft broad highlight
+            const float k = 1.0f + rowTone + row[(size_t)x] * 0.09f + sheen + (hashf((uint32_t)(x * 7 + y * 131)) - 0.5f) * 0.03f;
+            bd.setPixelColour(x, y, juce::Colour::fromFloatRGBA(juce::jlimit(0.0f, 1.0f, base.getFloatRed() * k), juce::jlimit(0.0f, 1.0f, base.getFloatGreen() * k), juce::jlimit(0.0f, 1.0f, base.getFloatBlue() * k), 1.0f));
+        }
+    }
+    return im;
+}
+
+juce::Image walnut(int w, int h) {
+    w = juce::jmax(1, w); h = juce::jmax(1, h);
+    juce::Image im(juce::Image::RGB, w, h, false);
+    juce::Image::BitmapData bd(im, juce::Image::BitmapData::writeOnly);
+    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+        // grain runs vertically; rings wobble with a slow noise along y
+        const float wob = 3.0f * std::sin(y * 0.013f) + 1.5f * std::sin(y * 0.041f + 1.3f) + 0.8f * std::sin(y * 0.11f);
+        const float ring = std::sin((x + wob) * 0.9f + std::sin(y * 0.02f) * 2.0f);
+        const float fleck = hashf((uint32_t)(x * 131 + y * 7)) - 0.5f;
+        const float t = 0.5f + 0.25f * ring + 0.12f * std::sin(y * 0.6f + x) * 0.2f + fleck * 0.1f;
+        const juce::Colour dark(0xff2a170c), light(0xff6b3f22);
+        bd.setPixelColour(x, y, dark.interpolatedWith(light, juce::jlimit(0.0f, 1.0f, t)));
+    }
+    return im;
+}
+
+const juce::Image& spunCap(int d) {
+    static std::map<int, juce::Image> cache;
+    d = juce::jlimit(8, 400, d);
+    auto it = cache.find(d); if (it != cache.end()) return it->second;
+    juce::Image im(juce::Image::ARGB, d, d, true);
+    {
+        juce::Image::BitmapData bd(im, juce::Image::BitmapData::writeOnly);
+        const float c = (d - 1) * 0.5f, R = d * 0.5f;
+        for (int y = 0; y < d; y++) for (int x = 0; x < d; x++) {
+            const float dx = x - c, dy = y - c, r = std::sqrt(dx * dx + dy * dy);
+            if (r > R) continue;
+            const float a = std::atan2(dy, dx);
+            // turned metal: anisotropic highlight bands at +/-45 degrees, fine concentric rings, darker rim
+            const float band = 0.5f + 0.5f * std::cos(2.0f * (a + 0.785f));
+            const float rings = 0.03f * std::sin(r * 2.2f) + (hashf((uint32_t)(int)(r * 8)) - 0.5f) * 0.05f;
+            const float rim = juce::jlimit(0.0f, 1.0f, (R - r) / 2.0f);
+            float v = 0.55f + 0.38f * band * band + rings - 0.16f * (r / R) * (r / R);
+            v = juce::jlimit(0.0f, 1.0f, v);
+            bd.setPixelColour(x, y, juce::Colour::fromFloatRGBA(v * 0.97f, v * 0.98f, v, rim));
+        }
+    }
+    return cache.emplace(d, im).first->second;
+}
+
+void drawBrushedPlate(juce::Graphics& g, juce::Rectangle<float> r, bool screws) {
+    static juce::Image cached; static juce::Rectangle<int> size;
+    if (size != r.toNearestInt().withZeroOrigin()) { size = r.toNearestInt().withZeroOrigin(); cached = brushed(size.getWidth(), size.getHeight(), juce::Colour(0xffb9bcc0)); }
+    g.setColour(juce::Colours::black.withAlpha(0.55f)); g.fillRoundedRectangle(r.translated(0, 3), 5);
+    juce::Path clip; clip.addRoundedRectangle(r, 5);
+    { juce::Graphics::ScopedSaveState ss(g); g.reduceClipRegion(clip); g.drawImageAt(cached, (int)r.getX(), (int)r.getY()); }
+    g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.25f), r.getX(), r.getY(), juce::Colours::black.withAlpha(0.18f), r.getX(), r.getBottom(), false));
+    g.fillRoundedRectangle(r, 5);
+    g.setColour(juce::Colours::white.withAlpha(0.6f)); g.drawLine(r.getX() + 5, r.getY() + 0.7f, r.getRight() - 5, r.getY() + 0.7f, 1.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.6f)); g.drawRoundedRectangle(r.reduced(0.5f), 5, 1.0f);
+    if (screws) {
+        drawScrew(g, r.getX() + 11, r.getY() + 11, 4.2f, 0.6f); drawScrew(g, r.getRight() - 11, r.getY() + 11, 4.2f, 2.1f);
+        drawScrew(g, r.getX() + 11, r.getBottom() - 11, 4.2f, 1.2f); drawScrew(g, r.getRight() - 11, r.getBottom() - 11, 4.2f, 0.2f);
+    }
+}
+
+void drawWoodCheek(juce::Graphics& g, juce::Rectangle<float> r) {
+    static juce::Image cached; static juce::Rectangle<int> size;
+    if (size != r.toNearestInt().withZeroOrigin()) { size = r.toNearestInt().withZeroOrigin(); cached = walnut(size.getWidth(), size.getHeight()); }
+    g.drawImageAt(cached, (int)r.getX(), (int)r.getY());
+    // satin finish: soft vertical highlight and darker edges
+    juce::ColourGradient cg(juce::Colours::black.withAlpha(0.45f), r.getX(), 0, juce::Colours::black.withAlpha(0.45f), r.getRight(), 0, false);
+    cg.addColour(0.4, juce::Colours::white.withAlpha(0.10f));
+    g.setGradientFill(cg); g.fillRect(r);
+}
+
 void drawScrew(juce::Graphics& g, float cx, float cy, float r, float angle) {
     g.setColour(juce::Colours::black.withAlpha(0.55f)); g.fillEllipse(cx - r - 1, cy - r, (r + 1) * 2, (r + 1) * 2);
     g.setGradientFill(juce::ColourGradient(juce::Colour(0xff9a9fa6), cx - r, cy - r, juce::Colour(0xff3c4046), cx + r, cy + r, false));
     g.fillEllipse(cx - r, cy - r, r * 2, r * 2);
-    juce::Path slot; slot.addRectangle(-r * 0.75f, -r * 0.14f, r * 1.5f, r * 0.28f);
-    g.setColour(juce::Colour(0xff1d1f22)); g.fillPath(slot, juce::AffineTransform::rotation(angle).translated(cx, cy));
+    g.setColour(juce::Colours::white.withAlpha(0.5f)); g.fillEllipse(cx - r * 0.55f, cy - r * 0.7f, r * 0.6f, r * 0.45f);
+    juce::Path slot; slot.addRectangle(-r * 0.7f, -r * 0.13f, r * 1.4f, r * 0.26f); slot.addRectangle(-r * 0.13f, -r * 0.7f, r * 0.26f, r * 1.4f);
+    g.setColour(juce::Colour(0xff17191b)); g.fillPath(slot, juce::AffineTransform::rotation(angle).translated(cx, cy));
+    g.setColour(juce::Colours::white.withAlpha(0.25f)); g.fillPath(slot, juce::AffineTransform::rotation(angle).translated(cx + 0.6f, cy + 0.6f));
+    g.setColour(juce::Colour(0xff17191b)); g.fillPath(slot, juce::AffineTransform::rotation(angle).translated(cx, cy));
 }
 
 void drawPlate(juce::Graphics& g, juce::Rectangle<float> r, const juce::String& title, bool screws) {
     // drop shadow, body with a faint vertical sheen, bevel, then a groove around the edge
     g.setColour(juce::Colours::black.withAlpha(0.45f)); g.fillRoundedRectangle(r.translated(0, 2), 4);
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff2b2e33), r.getX(), r.getY(), juce::Colour(0xff202326), r.getX(), r.getBottom(), false));
+    for (int i = 4; i >= 1; i--) { g.setColour(juce::Colours::black.withAlpha(0.07f)); g.fillRoundedRectangle(r.translated(0, (float)i).expanded((float)i * 0.6f), 4 + i * 0.5f); }   // soft shadow
+    g.setTiledImageFill(anodizedTile(), 0, 0, 1.0f); g.fillRoundedRectangle(r, 4);
+    g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.05f), r.getX(), r.getY(), juce::Colours::black.withAlpha(0.25f), r.getX(), r.getBottom(), false));
     g.fillRoundedRectangle(r, 4);
-    // fine brushed lines
-    juce::Random rnd(42);
-    for (float y = r.getY() + 2; y < r.getBottom() - 2; y += 2.0f) { g.setColour(juce::Colours::white.withAlpha(0.012f + 0.012f * rnd.nextFloat())); g.drawHorizontalLine((int)y, r.getX() + 2, r.getRight() - 2); }
     g.setColour(juce::Colours::white.withAlpha(0.10f)); g.drawLine(r.getX() + 4, r.getY() + 0.5f, r.getRight() - 4, r.getY() + 0.5f, 1.0f);
     g.setColour(juce::Colours::black.withAlpha(0.7f)); g.drawRoundedRectangle(r.reduced(0.5f), 4, 1.0f);
     if (title.isNotEmpty()) {
@@ -45,7 +151,8 @@ void drawPlate(juce::Graphics& g, juce::Rectangle<float> r, const juce::String& 
 
 void drawRecess(juce::Graphics& g, juce::Rectangle<float> r, float radius) {
     g.setColour(juce::Colour(0xff0f1012)); g.fillRoundedRectangle(r, radius);
-    g.setGradientFill(juce::ColourGradient(juce::Colours::black.withAlpha(0.6f), r.getX(), r.getY(), juce::Colours::transparentBlack, r.getX(), r.getY() + 6, false));
+    for (int i = 0; i < 5; i++) { g.setColour(juce::Colours::black.withAlpha(0.16f - i * 0.03f)); g.drawRoundedRectangle(r.reduced((float)i + 0.5f).withTrimmedBottom(-(float)i), radius, 1.0f); }
+    g.setGradientFill(juce::ColourGradient(juce::Colours::black.withAlpha(0.7f), r.getX(), r.getY(), juce::Colours::transparentBlack, r.getX(), r.getY() + 8, false));
     g.fillRoundedRectangle(r, radius);
     g.setColour(juce::Colours::black); g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
     g.setColour(juce::Colours::white.withAlpha(0.08f)); g.drawLine(r.getX() + radius, r.getBottom() + 0.5f, r.getRight() - radius, r.getBottom() + 0.5f, 1.0f);
@@ -62,17 +169,29 @@ void drawLcd(juce::Graphics& g, juce::Rectangle<float> r) {
     drawRecess(g, r.expanded(3), 5);
     g.setGradientFill(juce::ColourGradient(juce::Colour(0xff22140a), r.getX(), r.getY(), lcdBg, r.getX(), r.getBottom(), false));
     g.fillRoundedRectangle(r, 3);
-    g.setColour(juce::Colours::black.withAlpha(0.22f));
-    for (float y = r.getY(); y < r.getBottom(); y += 3) g.drawHorizontalLine((int)y, r.getX(), r.getRight());   // scanlines
-    g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.06f), r.getX(), r.getY(), juce::Colours::transparentWhite, r.getX(), r.getCentreY(), false));
-    g.fillRoundedRectangle(r, 3);                                                                                    // glass
+    // backlight bloom from the centre
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0x30ff9a30), r.getCentreX(), r.getCentreY(), juce::Colour(0x00ff9a30), r.getX(), r.getY(), true));
+    g.fillRoundedRectangle(r, 3);
+    // pixel matrix
+    g.setColour(juce::Colours::black.withAlpha(0.28f));
+    for (float y = r.getY(); y < r.getBottom(); y += 2) g.drawHorizontalLine((int)y, r.getX(), r.getRight());
+    g.setColour(juce::Colours::black.withAlpha(0.14f));
+    for (float x = r.getX(); x < r.getRight(); x += 2) g.drawVerticalLine((int)x, r.getY(), r.getBottom());
+    // glass: diagonal reflection and inner edge shadow
+    juce::Path refl; refl.startNewSubPath(r.getX(), r.getY()); refl.lineTo(r.getX() + r.getWidth() * 0.55f, r.getY()); refl.lineTo(r.getX() + r.getWidth() * 0.35f, r.getBottom()); refl.lineTo(r.getX(), r.getBottom()); refl.closeSubPath();
+    g.setColour(juce::Colours::white.withAlpha(0.035f)); g.fillPath(refl);
+    for (int i = 0; i < 4; i++) { g.setColour(juce::Colours::black.withAlpha(0.35f - i * 0.08f)); g.drawRoundedRectangle(r.reduced((float)i), 3, 1.0f); }
 }
 
 void drawEngraved(juce::Graphics& g, const juce::String& s, juce::Rectangle<int> r, juce::Justification j, float size) {
     const juce::Font f = juce::Font(font(size, true)).withExtraKerningFactor(0.12f);
     g.setFont(f);
-    g.setColour(juce::Colours::black.withAlpha(0.7f)); g.drawText(s, r.translated(0, 1), j, false);
-    g.setColour(dim.brighter(0.25f)); g.drawText(s, r, j, false);
+    g.setColour(juce::Colours::black.withAlpha(0.5f)); g.drawText(s, r.translated(0, 1), j, false);
+    g.setColour(text.withAlpha(0.78f)); g.drawText(s, r, j, false);
+}
+void drawPrinted(juce::Graphics& g, const juce::String& s, juce::Rectangle<int> r, juce::Justification j, float size, juce::Colour ink) {
+    g.setFont(juce::Font(font(size, true)).withExtraKerningFactor(0.12f));
+    g.setColour(ink); g.drawText(s, r, j, false);
 }
 } // namespace ui
 
@@ -133,28 +252,32 @@ void AetherLook::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
         g.setColour(lit ? accent.brighter(0.25f) : juce::Colour(0xff3a2414));
         g.fillEllipse(lx - dot, ly - dot, dot * 2, dot * 2);
     }
-    // knob body
+    // knob body: soft contact shadow, black rubber skirt with grip ridges, turned aluminium cap
     const float kr = R - (R > 30 ? 9.0f : 7.5f);
-    g.setColour(juce::Colours::black.withAlpha(0.6f)); g.fillEllipse(cx - kr - 1, cy - kr + 2, (kr + 1) * 2, (kr + 1) * 2);
-    // knurled skirt
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff3c4046), cx, cy - kr, juce::Colour(0xff15171a), cx, cy + kr, false));
+    for (int k = 6; k >= 1; k--) { g.setColour(juce::Colours::black.withAlpha(0.06f)); g.fillEllipse(cx - kr - k * 0.6f, cy - kr + k * 0.9f, (kr + k * 0.6f) * 2, (kr + k * 0.6f) * 2); }
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff34373b), cx, cy - kr, juce::Colour(0xff0d0e10), cx, cy + kr, false));
     g.fillEllipse(cx - kr, cy - kr, kr * 2, kr * 2);
-    g.setColour(juce::Colours::black.withAlpha(0.45f));
-    const int teeth = (int)(kr * 1.6f);
+    const int teeth = juce::jmax(18, (int)(kr * 1.9f));
     for (int i = 0; i < teeth; i++) {
         const float a = juce::MathConstants<float>::twoPi * i / teeth + ang;
-        g.drawLine(cx + (kr - 3.2f) * std::sin(a), cy - (kr - 3.2f) * std::cos(a), cx + kr * std::sin(a), cy - kr * std::cos(a), 1.0f);
+        const float lit = 0.5f + 0.5f * std::cos(a + 0.8f);       // ridges catch light on the upper left
+        g.setColour(juce::Colours::white.withAlpha(0.05f + 0.10f * lit));
+        g.drawLine(cx + (kr - 3.5f) * std::sin(a), cy - (kr - 3.5f) * std::cos(a), cx + (kr - 0.6f) * std::sin(a), cy - (kr - 0.6f) * std::cos(a), 1.1f);
+        g.setColour(juce::Colours::black.withAlpha(0.5f));
+        const float b = a + juce::MathConstants<float>::pi / teeth;
+        g.drawLine(cx + (kr - 3.5f) * std::sin(b), cy - (kr - 3.5f) * std::cos(b), cx + (kr - 0.6f) * std::sin(b), cy - (kr - 0.6f) * std::cos(b), 1.0f);
     }
-    // cap
-    const float cr = kr * 0.74f;
-    g.setGradientFill(juce::ColourGradient(capHi, cx - cr, cy - cr, capLo, cx + cr, cy + cr, true));
-    g.fillEllipse(cx - cr, cy - cr, cr * 2, cr * 2);
-    g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.18f), cx, cy - cr, juce::Colours::transparentWhite, cx, cy + cr * 0.2f, false));
-    g.fillEllipse(cx - cr, cy - cr, cr * 2, cr * 2);
-    g.setColour(juce::Colours::black.withAlpha(0.5f)); g.drawEllipse(cx - cr, cy - cr, cr * 2, cr * 2, 1.0f);
-    // indicator
-    juce::Path tick; tick.addRoundedRectangle(-1.4f, -kr + 1.5f, 2.8f, kr * 0.55f, 1.2f);
-    g.setColour(enabled ? text : dim); g.fillPath(tick, juce::AffineTransform::rotation(ang).translated(cx, cy));
+    g.setColour(juce::Colours::black.withAlpha(0.8f)); g.drawEllipse(cx - kr, cy - kr, kr * 2, kr * 2, 1.0f);
+    const float cr = kr * 0.72f;
+    g.setColour(juce::Colours::black.withAlpha(0.55f)); g.fillEllipse(cx - cr - 1, cy - cr - 0.5f, (cr + 1) * 2, (cr + 1) * 2 + 1);   // bevel under the cap
+    const int dia = (int)std::round(cr * 2);
+    g.drawImage(spunCap(dia), juce::Rectangle<float>(cx - cr, cy - cr, cr * 2, cr * 2), juce::RectanglePlacement::stretchToFit);
+    if (!enabled) { g.setColour(juce::Colours::black.withAlpha(0.45f)); g.fillEllipse(cx - cr, cy - cr, cr * 2, cr * 2); }
+    // engraved indicator on the cap, and a painted line on the skirt
+    juce::Path tick; tick.addRoundedRectangle(-1.3f, -cr + 2.0f, 2.6f, cr * 0.6f, 1.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.75f)); g.fillPath(tick, juce::AffineTransform::rotation(ang).translated(cx, cy));
+    juce::Path mark; mark.addRoundedRectangle(-1.2f, -kr + 0.8f, 2.4f, kr - cr - 0.8f, 0.8f);
+    g.setColour(enabled ? accent.brighter(0.2f) : dim); g.fillPath(mark, juce::AffineTransform::rotation(ang).translated(cx, cy));
 }
 
 void AetherLook::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h, float pos, float, float, juce::Slider::SliderStyle, juce::Slider&) {
@@ -184,12 +307,16 @@ void AetherLook::drawButtonBackground(juce::Graphics& g, juce::Button& b, const 
     g.setColour(juce::Colours::black.withAlpha(0.85f)); g.fillRoundedRectangle(r.expanded(1.5f), 4);
     if (!down) { g.setColour(juce::Colours::black.withAlpha(0.5f)); g.fillRoundedRectangle(r.translated(0, 2), 3); }
     const auto body = down ? r.translated(0, 1) : r;
-    juce::Colour top = over ? juce::Colour(0xff4a4f56) : juce::Colour(0xff41454b), bot = juce::Colour(0xff26292d);
-    if (down) std::swap(top, bot);
+    juce::Colour top = over ? juce::Colour(0xff3d4045) : juce::Colour(0xff35383c), bot = juce::Colour(0xff1c1e21);
+    if (down) { top = juce::Colour(0xff222427); bot = juce::Colour(0xff2c2f33); }
     g.setGradientFill(juce::ColourGradient(top, body.getX(), body.getY(), bot, body.getX(), body.getBottom(), false));
-    g.fillRoundedRectangle(body, 3);
-    g.setColour(juce::Colours::white.withAlpha(down ? 0.03f : 0.16f)); g.drawLine(body.getX() + 3, body.getY() + 0.8f, body.getRight() - 3, body.getY() + 0.8f, 1.0f);
-    g.setColour(juce::Colours::black.withAlpha(0.6f)); g.drawRoundedRectangle(body, 3, 1.0f);
+    g.fillRoundedRectangle(body, 4);
+    // rubber texture and a soft top gloss
+    { juce::Graphics::ScopedSaveState ss(g); juce::Path cl; cl.addRoundedRectangle(body, 4); g.reduceClipRegion(cl);
+      g.setTiledImageFill(ui::anodizedTile(), 0, 0, 0.35f); g.fillRect(body);
+      if (!down) { g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.13f), body.getX(), body.getY(), juce::Colours::transparentWhite, body.getX(), body.getY() + body.getHeight() * 0.5f, false)); g.fillRect(body); } }
+    g.setColour(juce::Colours::white.withAlpha(down ? 0.02f : 0.18f)); g.drawLine(body.getX() + 4, body.getY() + 0.8f, body.getRight() - 4, body.getY() + 0.8f, 1.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.7f)); g.drawRoundedRectangle(body, 4, 1.0f);
     if (led) {
         const float lw = juce::jmin(16.0f, body.getWidth() * 0.3f);
         drawLed(g, { body.getCentreX() - lw / 2, body.getY() + 4, lw, 3 }, on);

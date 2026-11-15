@@ -25,6 +25,14 @@ void drawRecess(juce::Graphics&, juce::Rectangle<float>, float radius = 3.0f);
 void drawLed(juce::Graphics&, juce::Rectangle<float>, bool on, juce::Colour c = accent);
 void drawLcd(juce::Graphics&, juce::Rectangle<float>);
 void drawEngraved(juce::Graphics&, const juce::String&, juce::Rectangle<int>, juce::Justification, float size = 12.0f);
+void drawPrinted(juce::Graphics&, const juce::String&, juce::Rectangle<int>, juce::Justification, float size, juce::Colour ink);
+// procedural materials, cached
+const juce::Image& anodizedTile();                 // fine grain dark metal, tiles seamlessly
+juce::Image brushed(int w, int h, juce::Colour base);
+juce::Image walnut(int w, int h);
+const juce::Image& spunCap(int diameter);          // turned aluminium knob cap with a ring highlight
+void drawBrushedPlate(juce::Graphics&, juce::Rectangle<float>, bool screws);
+void drawWoodCheek(juce::Graphics&, juce::Rectangle<float>);
 }
 
 class AetherLook : public juce::LookAndFeel_V4 {

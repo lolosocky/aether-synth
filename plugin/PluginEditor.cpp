@@ -33,6 +33,35 @@ void OrbPad::paint(juce::Graphics& g) {
     ui::drawEngraved(g, "Y", in.toNearestInt().removeFromTop(14).removeFromLeft(14), juce::Justification::centred, 11);
 }
 
+// ------------------------------------------------------------------ keys
+void HardwareKeys::drawWhiteNote(int note, juce::Graphics& g, juce::Rectangle<float> a, bool down, bool over, juce::Colour, juce::Colour) {
+    const auto k = a.reduced(0.6f, 0);
+    const float lip = down ? 3.0f : 7.0f;
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xffd8d4cb), k.getX(), k.getY(), juce::Colour(0xfff4f1ea), k.getX(), k.getBottom() - lip, false));
+    g.fillRect(k.withTrimmedBottom(lip));
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xffcfcac0), k.getX(), k.getBottom() - lip, juce::Colour(0xff9c978e), k.getX(), k.getBottom(), false));
+    g.fillRect(k.withTop(k.getBottom() - lip));
+    g.setColour(juce::Colours::black.withAlpha(0.35f)); g.drawVerticalLine((int)a.getRight() - 1, a.getY(), a.getBottom());
+    g.setColour(juce::Colours::white.withAlpha(0.6f)); g.drawVerticalLine((int)a.getX() + 1, a.getY(), a.getBottom() - lip);
+    if (down) { g.setColour(ui::accent.withAlpha(0.45f)); g.fillRect(k.withTrimmedBottom(lip)); }
+    else if (over) { g.setColour(ui::accent.withAlpha(0.12f)); g.fillRect(k); }
+    if (note % 12 == 0) {
+        g.setFont(ui::font(11.0f, true)); g.setColour(juce::Colour(0xff7a756c));
+        g.drawText(getWhiteNoteText(note), k.withTrimmedBottom(lip + 2).removeFromBottom(14), juce::Justification::centred);
+    }
+}
+void HardwareKeys::drawBlackNote(int, juce::Graphics& g, juce::Rectangle<float> a, bool down, bool over, juce::Colour) {
+    g.setColour(juce::Colours::black.withAlpha(0.45f)); g.fillRoundedRectangle(a.translated(1.5f, 2.0f), 2);
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff2a2b2e), a.getX(), a.getY(), juce::Colour(0xff060607), a.getX(), a.getBottom(), false));
+    g.fillRoundedRectangle(a, 2);
+    const auto top = a.reduced(a.getWidth() * 0.16f, 0).withTrimmedBottom(down ? 4.0f : 9.0f);
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff17181a), top.getX(), top.getY(), juce::Colour(0xff3a3c40), top.getX(), top.getBottom(), false));
+    g.fillRoundedRectangle(top, 1.5f);
+    g.setColour(juce::Colours::white.withAlpha(0.22f)); g.drawLine(top.getX() + 1, top.getBottom() - 1, top.getRight() - 1, top.getBottom() - 1, 1.0f);
+    if (down) { g.setColour(ui::accent.withAlpha(0.6f)); g.fillRoundedRectangle(top, 1.5f); }
+    else if (over) { g.setColour(ui::accent.withAlpha(0.2f)); g.fillRoundedRectangle(a, 2); }
+}
+
 // ------------------------------------------------------------------ knob
 Knob::Knob(juce::AudioProcessorValueTreeState& s, const char* id, const juce::String& text) {
     slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
@@ -186,19 +215,19 @@ void AetherEditor::paint(juce::Graphics& g) {
     const auto b = getLocalBounds().toFloat();
     g.setGradientFill(juce::ColourGradient(juce::Colour(0xff222428), 0, 0, juce::Colour(0xff121315), 0, b.getHeight(), false));
     g.fillRect(b);
-    for (float x : { 0.0f, b.getWidth() - 10 }) {
-        g.setGradientFill(juce::ColourGradient(juce::Colour(0xff3a3d42), x, 0, juce::Colour(0xff1b1d20), x + 10, 0, false));
-        g.fillRect(x, 0.0f, 10.0f, b.getHeight());
-    }
+    g.setTiledImageFill(ui::anodizedTile(), 0, 0, 1.0f); g.fillRect(b);
+    g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.03f), 0, 0, juce::Colours::black.withAlpha(0.35f), 0, b.getHeight(), false)); g.fillRect(b);
+    ui::drawWoodCheek(g, { 0.0f, 0.0f, 16.0f, b.getHeight() });
+    ui::drawWoodCheek(g, { b.getWidth() - 16, 0.0f, 16.0f, b.getHeight() });
     // header plate: brand + display
-    const auto head = juce::Rectangle<float>(16, 10, b.getWidth() - 32, 92);
-    ui::drawPlate(g, head, {}, true);
+    const auto head = juce::Rectangle<float>(24, 10, b.getWidth() - 48, 92);
+    ui::drawBrushedPlate(g, head, true);
     {
         auto br = head.reduced(26, 0).withWidth(200).toNearestInt();
         g.setFont(juce::Font(ui::font(40.0f, true)).withExtraKerningFactor(0.18f));
-        g.setColour(juce::Colours::black.withAlpha(0.6f)); g.drawText("AETHER", br.withTrimmedBottom(18).translated(0, 1), juce::Justification::bottomLeft);
-        g.setColour(ui::text); g.drawText("AETHER", br.withTrimmedBottom(18), juce::Justification::bottomLeft);
-        ui::drawEngraved(g, "LAYERED SYNTHESIS ENGINE", br.withTrimmedTop(br.getHeight() - 24).withTrimmedBottom(6), juce::Justification::topLeft, 11.5f);
+        g.setColour(juce::Colours::white.withAlpha(0.45f)); g.drawText("AETHER", br.withTrimmedBottom(18).translated(0, 1), juce::Justification::bottomLeft);
+        g.setColour(juce::Colour(0xff141516)); g.drawText("AETHER", br.withTrimmedBottom(18), juce::Justification::bottomLeft);
+        ui::drawPrinted(g, "LAYERED SYNTHESIS ENGINE", br.withTrimmedTop(br.getHeight() - 24).withTrimmedBottom(6), juce::Justification::topLeft, 11.5f, juce::Colour(0xff2a2b2d));
     }
     ui::drawLcd(g, lcdArea.toFloat());
     // browser and the play page plates
@@ -213,7 +242,7 @@ void AetherEditor::paint(juce::Graphics& g) {
     g.setColour(juce::Colour(0xff7a1f12)); g.fillRect(keys.getX() - 1.0f, keys.getY() - 4.0f, keys.getWidth() + 2.0f, 4.0f);   // felt strip
 }
 void AetherEditor::resized() {
-    auto r = getLocalBounds().reduced(16, 10).withTrimmedLeft(4).withTrimmedRight(4);
+    auto r = getLocalBounds().reduced(16, 10).withTrimmedLeft(12).withTrimmedRight(12);
     // header
     auto head = r.removeFromTop(92).reduced(26, 12);
     head.removeFromLeft(210);

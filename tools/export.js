@@ -1,6 +1,6 @@
 // Exports the preset library and the source definitions from the browser synth for the plugin, plus reference renders for the port test.
 const fs = require('fs'), zlib = require('zlib'), path = require('path');
-const WEB = process.env.AETHER_WEB || '/home/claude/aether';
+const WEB = process.env.AETHER_WEB || require('path').join(__dirname, '..', 'web');
 const D = require(WEB + '/src/dsp.js')();
 const TRIMS = JSON.parse(fs.readFileSync(WEB + '/src/trims.json', 'utf8'));
 const LIB = require(WEB + '/src/presets.js')(D, TRIMS);

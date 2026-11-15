@@ -21,6 +21,14 @@ private:
     AetherProcessor& proc; juce::RangedAudioParameter* px; juce::RangedAudioParameter* py; bool held = false;
 };
 
+// Keyboard drawn like real keys: ivory with a front lip, glossy black keys with a bevel.
+class HardwareKeys : public juce::MidiKeyboardComponent {
+public:
+    using juce::MidiKeyboardComponent::MidiKeyboardComponent;
+    void drawWhiteNote(int note, juce::Graphics&, juce::Rectangle<float> area, bool down, bool over, juce::Colour, juce::Colour) override;
+    void drawBlackNote(int note, juce::Graphics&, juce::Rectangle<float> area, bool down, bool over, juce::Colour) override;
+};
+
 struct Knob : juce::Component {
     Knob(juce::AudioProcessorValueTreeState& s, const char* id, const juce::String& label);
     void resized() override;
@@ -57,7 +65,7 @@ private:
     OrbPad orb;
     std::unique_ptr<Knob> macros[4], perf[6], layers[4], volume;
     juce::Label secMacro, secPerf, secLayers, secOrb;
-    juce::MidiKeyboardComponent keys;
+    HardwareKeys keys;
     juce::Random random;
     static constexpr int kPages = 6;
     juce::TextButton pageTabs[kPages + 1];

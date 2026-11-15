@@ -3,17 +3,7 @@
 
 namespace edit { class Page; class Scroller; }
 
-namespace ui {
-const juce::Colour bg{ 0xff0d0f14 }, panel{ 0xff161a22 }, line{ 0xff262c38 }, text{ 0xffe8ebf2 }, dim{ 0xff8a93a6 }, accent{ 0xff7c9cff }, accent2{ 0xffc58bff };
-}
-
-class AetherLook : public juce::LookAndFeel_V4 {
-public:
-    AetherLook();
-    void drawRotarySlider(juce::Graphics&, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider&) override;
-    void drawLinearSlider(juce::Graphics&, int x, int y, int w, int h, float pos, float, float, juce::Slider::SliderStyle, juce::Slider&) override;
-    void drawButtonBackground(juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
-};
+#include "Hardware.h"
 
 // XY pad for the Orb: drag to steer two morph axes the preset maps to its sound.
 class OrbPad : public juce::Component, private juce::Timer {
@@ -74,6 +64,7 @@ private:
     std::unique_ptr<edit::Page> pages[kPages];
     std::unique_ptr<edit::Scroller> scrollers[kPages];
     int page = 0, lastGen = -1;
-    juce::Rectangle<int> centre;
+    juce::Rectangle<int> centre, lcdArea, browserPlate, playPlates[4];
+    juce::Label sectionLcd;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AetherEditor)
 };

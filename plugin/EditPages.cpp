@@ -58,7 +58,7 @@ static const json* walk(const json& root, const std::string& path) {
 // ------------------------------------------------------------------ control
 Control::Control(AetherProcessor& p, Kind k, std::string pth, juce::String lbl) : proc(p), kind(k), path(std::move(pth)), text(std::move(lbl)) {
     label.setText(text, juce::dontSendNotification); label.setJustificationType(kind == Kind::knob ? juce::Justification::centred : juce::Justification::centredLeft);
-    label.setFont(juce::FontOptions(11.5f)); label.setColour(juce::Label::textColourId, ui::dim); label.setMinimumHorizontalScale(0.7f);
+    label.setFont(ui::font(13.0f, true)); label.setColour(juce::Label::textColourId, ui::text.withAlpha(0.8f)); label.setMinimumHorizontalScale(0.7f); label.getProperties().set("caps", true);
     label.setInterceptsMouseClicks(false, false);
     if (kind == Kind::knob) {
         slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
@@ -176,13 +176,7 @@ int Page::layout(int width) {
     return y + rowH + 8;
 }
 void Page::paint(juce::Graphics& g) {
-    for (size_t i = 0; i < cards.size() && i < sections.size(); i++) {
-        const auto r = cards[i].toFloat();
-        g.setColour(ui::panel); g.fillRoundedRectangle(r, 8);
-        g.setColour(ui::line); g.drawRoundedRectangle(r.reduced(0.5f), 8, 1);
-        g.setColour(ui::dim); g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-        g.drawText(sections[i].title.toUpperCase(), cards[i].withHeight(22).reduced(10, 0), juce::Justification::centredLeft);
-    }
+    for (size_t i = 0; i < cards.size() && i < sections.size(); i++) ui::drawPlate(g, cards[i].toFloat(), sections[i].title);
 }
 
 // ------------------------------------------------------------------ shared lists
@@ -218,7 +212,7 @@ void LayersPage::rebuild() {
     aether::Patch P = aether::patchFromJson(pj);
     for (int i = 0; i < 4; i++) {
         tabs[i].setButtonText(juce::String::charToString((juce::juce_wchar)('A' + i)) + "  " + (P.L[i].on ? nice[juce::jlimit(0, 7, P.L[i].mode)] : "off"));
-        tabs[i].setColour(juce::TextButton::buttonColourId, i == layer ? ui::accent.withAlpha(0.35f) : ui::panel);
+        tabs[i].getProperties().set("led", true); tabs[i].setToggleState(i == layer, juce::dontSendNotification);
         tabs[i].setColour(juce::TextButton::textColourOffId, P.L[i].on ? ui::text : ui::dim);
     }
     const aether::Layer& L = P.L[layer];
@@ -477,7 +471,7 @@ void SectionsPage::rebuild() {
             auto& b = own(std::make_unique<juce::TextButton>(aether::sectionName(i)));
             b.onClick = [this, i] { auto* prm = proc.apvts.getParameter("section"); prm->beginChangeGesture(); prm->setValueNotifyingHost(prm->convertTo0to1((float)i)); prm->endChangeGesture();
                                     if (auto* o = proc.apvts.getParameter("secon")) if (o->getValue() < 0.5f) o->setValueNotifyingHost(1.0f); };
-            b.getProperties().set("w", 84); b.getProperties().set("h", 32); s.items.push_back(&b); secBtn[i] = &b;
+            b.getProperties().set("w", 84); b.getProperties().set("h", 40); s.items.push_back(&b); secBtn[i] = &b;
         }
         auto& now = own(std::make_unique<juce::Label>()); now.setColour(juce::Label::textColourId, ui::dim); now.setFont(juce::FontOptions(12.0f));
         now.getProperties().set("w", 200); now.getProperties().set("h", 32); s.items.push_back(&now); nowLabel = &now;
@@ -528,7 +522,7 @@ void SectionsPage::timerCallback() {
     const float sel = proc.apvts.getRawParameterValue("section")->load();
     for (int i = 0; i < 4; i++) if (secBtn[i]) {
         const bool cur = now >= 0 ? std::abs(now - (float)i) < 0.5f : std::abs(sel - (float)i) < 0.5f;
-        secBtn[i]->setColour(juce::TextButton::buttonColourId, cur ? (now >= 0 ? ui::accent.withAlpha(0.6f) : ui::accent.withAlpha(0.25f)) : ui::panel);
+        secBtn[i]->getProperties().set("led", true); secBtn[i]->setToggleState(cur, juce::dontSendNotification);
     }
     if (nowLabel) nowLabel->setText(now < 0 ? juce::String("Off: the preset plays as designed") : "Playing: " + juce::String(aether::sectionName(juce::roundToInt(now))) + (std::abs(now - std::round(now)) > 0.02f ? " (morphing)" : ""), juce::dontSendNotification);
 }

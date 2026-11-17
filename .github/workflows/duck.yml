@@ -1,0 +1,81 @@
+name: Build LGN Duck
+
+on:
+  push:
+    branches: [duck-plugin]
+    paths: ["duck/**", ".github/workflows/duck.yml"]
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Engine tests
+        run: clang++ -std=c++17 -O2 duck/tests/dsp_test.cpp -o dsp_test && ./dsp_test
+      - name: Configure
+        run: cmake -S duck -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+      - name: Build VST3 + AU (universal)
+        run: cmake --build build --config Release --target LGNDuck_VST3 LGNDuck_AU -- -quiet
+      - name: Ad-hoc sign and package
+        run: |
+          mkdir -p dist
+          cp -R "build/LGNDuck_artefacts/Release/VST3/LGN Duck.vst3" dist/
+          cp -R "build/LGNDuck_artefacts/Release/AU/LGN Duck.component" dist/
+          codesign --force --deep --sign - "dist/LGN Duck.vst3"
+          codesign --force --deep --sign - "dist/LGN Duck.component"
+          cp duck/packaging/INSTALL-mac.txt dist/
+          cp duck/packaging/install-mac.command dist/ && chmod +x dist/install-mac.command
+          cd dist && ditto -c -k --keepParent . ../LGN-Duck-mac.zip
+      - name: Validate AU
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "dist/LGN Duck.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -v aufx Duck Lgnx | tail -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LGN-Duck-mac
+          path: LGN-Duck-mac.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure
+        run: cmake -S duck -B build -A x64
+      - name: Build VST3
+        run: cmake --build build --config Release --target LGNDuck_VST3
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -Recurse "build/LGNDuck_artefacts/Release/VST3/LGN Duck.vst3" dist/
+          Copy-Item duck/packaging/INSTALL-windows.txt dist/
+          Compress-Archive -Path dist/* -DestinationPath LGN-Duck-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LGN-Duck-windows
+          path: LGN-Duck-windows.zip
+
+  release:
+    needs: [macos, windows]
+    if: always() && (needs.macos.result == 'success' || needs.windows.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Publish LGN Duck build
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: duck-latest
+          target_commitish: ${{ github.sha }}
+          name: LGN Duck (latest build)
+          prerelease: true
+          make_latest: false
+          body: "LGN Duck sidechain plugin, automatic build from ${{ github.sha }}. LGN-Duck-windows.zip = Windows (VST3). LGN-Duck-mac.zip = Mac (VST3 + AU)."
+          files: out/**/*.zip

@@ -1,0 +1,16 @@
+LGN DUCK FOR WINDOWS (FL Studio, VST3)
+
+1. Copy the "LGN Duck.vst3" folder to  C:\Program Files\Common Files\VST3\
+2. In FL Studio: Options > Manage plugins > Find more plugins.
+3. Put LGN Duck on the mixer track you want to pump (pads, chords, bass...).
+
+TEMPO mode (default): press play. It pumps in time with your song. No routing needed.
+   AMOUNT = how far the volume dips.  RELEASE = how long it takes to come back.  RATE = how often.
+
+KICK mode: ducks every time your kick hits.
+   1. Select the kick's mixer track.
+   2. Right-click the little arrow at the bottom of the track that has LGN Duck > "Sidechain to this track".
+   3. In LGN Duck's plugin window, open the wrapper menu (top-left) > "Processing" tab and set
+      the sidechain input to the kick's track. Then click KICK in LGN Duck.
+
+If Windows SmartScreen warns about it, choose "More info" > "Run anyway" (the plugin isn't code-signed).

@@ -1,0 +1,10 @@
+LGN DUCK FOR MAC (VST3 + AU)
+
+Easiest: double-click install-mac.command (it copies both versions into place and clears the
+"downloaded from the internet" flag so the Mac lets the plugin load).
+
+Manual: copy "LGN Duck.vst3" to ~/Library/Audio/Plug-Ins/VST3/ and "LGN Duck.component" to
+~/Library/Audio/Plug-Ins/Components/, then rescan plugins in your DAW.
+
+TEMPO mode (default): press play. It pumps in time with your song. No routing needed.
+KICK mode: send your kick to LGN Duck's sidechain input, then click KICK.

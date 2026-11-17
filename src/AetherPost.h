@@ -1,4 +1,4 @@
-// Output effects after the voice engine: EQ, stereo delay, reverb send/return, compressor, width, limiter, soft clip.
+// Output effects after the voice engine: EQ, stereo delay, reverb send/return, compressor, width, lookahead limiter, soft clip.
 // Mirrors the browser version's native chain. The reverb convolution itself is supplied by the host wrapper.
 #pragma once
 #include "AetherEngine.h"
@@ -86,6 +86,38 @@ inline void makeIR(int type, double decayIn, double sizeIn, double dampIn, doubl
     for (int i = 0; i < len; i++) { outL[(size_t)i] = (float)(outL[(size_t)i] * scale); outR[(size_t)i] = (float)(outR[(size_t)i] * scale); }
 }
 
+// Stereo-linked lookahead brickwall limiter. A sliding minimum of the gain each sample needs, held for the release, then
+// averaged over the same window: the gain is already down when a peak leaves the delay line, so transients and stacked
+// chords never overshoot the ceiling into the soft clip. Latency = W samples (about 1.5 ms), reported to the host.
+struct Brickwall {
+    int W = 64, pos = 0, rp = 0; double ceil = 0.84, relC = 0, env = 1, sum = 0; std::vector<float> dL, dR; std::vector<double> req, mins;
+    void prepare(double sr) {
+        W = std::max(8, (int)std::lround(0.0015 * sr)); relC = 1 - std::exp(-1 / (0.08 * sr));
+        dL.assign((size_t)W, 0.0f); dR.assign((size_t)W, 0.0f); req.assign((size_t)W + 1, 1.0); mins.assign((size_t)W, 1.0); reset();
+    }
+    void reset() { std::fill(dL.begin(), dL.end(), 0.0f); std::fill(dR.begin(), dR.end(), 0.0f); std::fill(req.begin(), req.end(), 1.0); std::fill(mins.begin(), mins.end(), 1.0); env = 1; sum = (double)W; pos = rp = 0; gr = 0; }
+    int latency() const { return W; }
+    double gr = 0;   // deepest gain reduction in the last block, dB (for metering)
+    void process(float* L, float* R, int n) {
+        double deepest = 1;
+        for (int i = 0; i < n; i++) {
+            const double a = std::max(std::abs((double)L[i]), std::abs((double)R[i]));
+            req[(size_t)rp] = a > ceil ? ceil / a : 1.0; rp = (rp + 1) % (W + 1);
+            double m = 1; for (int k = 0; k <= W; k++) m = std::min(m, req[(size_t)k]);  // min over the lookahead window (W + 1 samples)
+            env = m < env ? m : env + (1 - env) * relC;                                    // instant down, smooth release
+            if (env > m) env = m;
+            sum += env - mins[(size_t)pos]; mins[(size_t)pos] = env;                       // running average of the held gain
+            const double g = std::min(1.0, sum / W);
+            const float oL = dL[(size_t)pos], oR = dR[(size_t)pos]; dL[(size_t)pos] = L[i]; dR[(size_t)pos] = R[i];
+            L[i] = (float)(oL * g); R[i] = (float)(oR * g);
+            deepest = std::min(deepest, g);
+            pos = (pos + 1) % W;
+            if (pos == 0) { sum = 0; for (double v : mins) sum += v; }                        // re-sum once per window so rounding never drifts
+        }
+        gr = 20 * std::log10(std::max(deepest, 1e-6));
+    }
+};
+
 class PostFX {
 public:
     void prepare(double sampleRate) {
@@ -93,12 +125,12 @@ public:
         for (auto& d : dbuf) d.assign((size_t)dlen, 0.0f);
         plen = 1; while (plen < (int)(0.6 * sr)) plen <<= 1;
         for (auto& d : pbuf) d.assign((size_t)plen, 0.0f);
-        reset(); first = true;
+        wall.prepare(sr); reset(); first = true;
     }
     void reset() {
         for (auto& d : dbuf) std::fill(d.begin(), d.end(), 0.0f);
         for (auto& d : pbuf) std::fill(d.begin(), d.end(), 0.0f);
-        eqL.reset(); eqM.reset(); eqH.reset(); lp.reset(); hp.reset(); rlc.reset(); comp.gr = 0; lim.gr = 0; fbL = fbR = 0; dw = pw = 0;
+        eqL.reset(); eqM.reset(); eqH.reset(); lp.reset(); hp.reset(); rlc.reset(); comp.gr = 0; wall.reset(); fbL = fbR = 0; dw = pw = 0;
     }
     // Stage 1: EQ and delay in place; writes the pre-delayed reverb send. fxm = engine's effect modulation offsets.
     void stage1(const Patch& P, const double* fxm, double bpm, float* L, float* R, float* sendL, float* sendR, int n, double pocket = 0) {
@@ -177,17 +209,22 @@ public:
             const double l = L[i] * cg, rr = R[i] * cg, p = (1 + w) * 0.5, q = (1 - w) * 0.5;
             L[i] = (float)(l * p + rr * q); R[i] = (float)(rr * p + l * q);
         }
-        lim.att = 0.001; lim.rel = 0.12; lim.set(-2, 20, 0);
-        lim.process(L, R, n, sr);
+        // level (with the +1.14 dB the old limiter's make-up always added, so unlimited presets keep their loudness),
+        // then the lookahead limiter catches every peak below the soft clip's knee; the clip is now only a safety net
         for (int i = 0; i < n; i++) {
-            const double a = (double)(i + 1) / n, m = m0 + (sMaster - m0) * a;
-            L[i] = (float)clip(L[i] * m); R[i] = (float)clip(R[i] * m);
+            const double a = (double)(i + 1) / n, m = (m0 + (sMaster - m0) * a) * kLevel;
+            L[i] = (float)(L[i] * m); R[i] = (float)(R[i] * m);
         }
+        wall.process(L, R, n);
+        for (int i = 0; i < n; i++) { L[i] = (float)clip(L[i]); R[i] = (float)clip(R[i]); }
     }
     static inline double clip(double x) { const double a = std::abs(x); if (a < 0.85) return x; const double y = 0.85 + 0.15 * std::tanh((std::min(a, 2.0) - 0.85) / 0.15); return x < 0 ? -y : y; }
+    int latency() const { return wall.latency(); }
+    double limiterGR() const { return wall.gr; }
+    static constexpr double kLevel = 1.1406;
     double sr = 48000;
 private:
-    Biquad eqL, eqM, eqH, lp, hp, rlc, pk1, pk2; Dyn comp, lim; double sPocket = 0;
+    Biquad eqL, eqM, eqH, lp, hp, rlc, pk1, pk2; Dyn comp; Brickwall wall; double sPocket = 0;
     std::vector<float> dbuf[2], pbuf[2]; int dlen = 1, plen = 1, dw = 0, pw = 0; bool first = true, dclear = true;
     double fbL = 0, fbR = 0, lfo = 0;
     double sLo = 0, sMi = 0, sHi = 0, sMf = 1000, sMix = 0, sFb = 0.35, sPP = 1, sTime = 0.35, sHc = 5000, sLc = 250, sMod = 0, sWet = 0, sDry = 1, sCg = 1, sW = 1, sMaster = 0.8;

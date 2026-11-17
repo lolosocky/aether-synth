@@ -210,6 +210,7 @@ void AetherProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
     sr = sampleRate;
     engine.setSampleRate(sampleRate); engine.panic();
     post.prepare(sampleRate);
+    setLatencySamples(post.latency());   // the output limiter looks ahead ~1.5 ms; the host compensates
     const int n = juce::jmax(64, samplesPerBlock); maxBlock = n;
     bufL.assign((size_t)n, 0.0f); bufR.assign((size_t)n, 0.0f); sendL.assign((size_t)n, 0.0f); sendR.assign((size_t)n, 0.0f);
     conv.prepare({ sampleRate, (juce::uint32)n, 2 });

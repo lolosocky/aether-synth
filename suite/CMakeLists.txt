@@ -24,8 +24,15 @@ set(LGN_DEFS JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUC
 set(LGN_PLUGINS "")
 
 # lgn_plugin(<target> <4-char code> <product name> <bundle suffix> <vst3 categories, | separated> <source>)
+# Add INSTRUMENT after the source for a MIDI-driven instrument (no audio input).
 function(lgn_plugin target code product bundle categories source)
   string(REPLACE "|" ";" cats "${categories}")
+  set(is_synth FALSE)
+  set(au_type kAudioUnitType_Effect)
+  if("INSTRUMENT" IN_LIST ARGN)
+    set(is_synth TRUE)
+    set(au_type kAudioUnitType_MusicDevice)
+  endif()
   juce_add_plugin(${target}
     COMPANY_NAME "LGN"
     BUNDLE_ID "com.lgn.${bundle}"
@@ -33,12 +40,12 @@ function(lgn_plugin target code product bundle categories source)
     PLUGIN_CODE ${code}
     FORMATS ${LGN_FORMATS}
     PRODUCT_NAME "${product}"
-    IS_SYNTH FALSE
-    NEEDS_MIDI_INPUT FALSE
+    IS_SYNTH ${is_synth}
+    NEEDS_MIDI_INPUT ${is_synth}
     NEEDS_MIDI_OUTPUT FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
     VST3_CATEGORIES ${cats}
-    AU_MAIN_TYPE kAudioUnitType_Effect)
+    AU_MAIN_TYPE ${au_type})
   target_sources(${target} PRIVATE common/Suite.cpp ${source})
   target_include_directories(${target} PRIVATE common dsp)
   station_use(${target})
@@ -70,6 +77,7 @@ lgn_plugin(LGN_Delay      LgDl "LGN Delay"      delay     "Fx|Delay"       delay
 lgn_plugin(LGN_Limiter    LgLm "LGN Limiter"    limiter   "Fx|Dynamics"    limit/LimitPlugin.cpp)
 lgn_plugin(LGN_Gravity    LgGv "LGN Gravity"    gravity   "Fx|Pitch Shift" gravity/GravityPlugin.cpp)
 lgn_plugin(LGN_Duck       Duck "LGN Duck"       duck      "Fx|Dynamics"    duck/DuckPlugin.cpp)
+lgn_plugin(LGN_Fret       Fret "LGN Fret"       fret      "Instrument|Synth" fret/FretPlugin.cpp INSTRUMENT)
 
 # DSP unit tests (no JUCE).
 add_executable(lgn_dsp_test EXCLUDE_FROM_ALL tests/dsp_test.cpp)

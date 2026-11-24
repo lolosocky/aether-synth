@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  PLUGINS: LGN_EQ LGN_Compressor LGN_DeEsser LGN_Saturator LGN_Reverb LGN_Delay LGN_Limiter LGN_Gravity LGN_Duck
+  PLUGINS: LGN_EQ LGN_Compressor LGN_DeEsser LGN_Saturator LGN_Reverb LGN_Delay LGN_Limiter LGN_Gravity LGN_Duck LGN_Fret
 
 jobs:
   test:
@@ -49,7 +49,7 @@ jobs:
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           cp -R dist/*.component ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
-          for c in LgEq LgCp LgDs LgSt LgRv LgDl LgLm LgGv Duck; do auval -v aufx $c Lgnx | tail -3; done
+          for c in LgEq LgCp LgDs LgSt LgRv LgDl LgLm LgGv Duck; do auval -v aufx $c Lgnx | tail -3; done; auval -v aumu Fret Lgnx | tail -3
       - uses: actions/upload-artifact@v4
         with:
           name: LGN-Suite-mac
@@ -97,5 +97,5 @@ jobs:
           name: LGN Mixing Suite (latest build)
           prerelease: true
           make_latest: false
-          body: "Automatic build from ${{ github.sha }}. LGN-Suite-mac.zip: all nine plugins as VST3 + AU for Mac. LGN-Suite-windows.zip: VST3 for Windows."
+          body: "Automatic build from ${{ github.sha }}. LGN-Suite-mac.zip: all ten plugins (nine effects + the Fret guitar) as VST3 + AU for Mac. LGN-Suite-windows.zip: VST3 for Windows."
           files: out/**/*.zip

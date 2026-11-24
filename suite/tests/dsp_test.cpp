@@ -8,6 +8,7 @@
 #include "Limit.h"
 #include "Gravity.h"
 #include "Duck.h"
+#include "Guitar.h"
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -370,8 +371,89 @@ static void testDuck() {
     }
 }
 
+static void testGuitar() {
+    std::printf("Guitar\n");
+    const double sr = 48000;
+    auto render = [&](GuitarParams p, std::vector<std::pair<int, int>> ons, double secs, std::vector<std::pair<int, int>> offs = {}) {
+        GuitarDsp g; g.set(p); g.prepare(sr);
+        const int n = (int)(secs * sr); std::vector<float> L((size_t)n), R((size_t)n);
+        for (int o = 0; o < n; o += 256) {
+            const int m = std::min(256, n - o);
+            for (auto& e : ons) if (e.second >= o && e.second < o + m) g.noteOn(e.first, 0.8, e.second - o);
+            for (auto& e : offs) if (e.second >= o && e.second < o + m) g.noteOff(e.first, e.second - o);
+            g.process(L.data() + o, R.data() + o, m);
+        }
+        for (int i = 0; i < n; i++) L[(size_t)i] = 0.5f * (L[(size_t)i] + R[(size_t)i]);
+        return L;
+    };
+    auto pitch = [&](const std::vector<float>& x, size_t from, size_t len, double expect) {
+        double best = 0, bf = expect;
+        for (double c = -50; c <= 50; c += 0.25) {
+            const double f = expect * std::pow(2.0, c / 1200); double re = 0, im = 0;
+            for (size_t i = 0; i < len; i++) { const double w = 0.5 - 0.5 * std::cos(2 * kPi * i / len); re += x[from + i] * w * std::cos(2 * kPi * f * i / sr); im -= x[from + i] * w * std::sin(2 * kPi * f * i / sr); }
+            if (re * re + im * im > best) { best = re * re + im * im; bf = f; }
+        }
+        return 1200 * std::log2(bf / expect);
+    };
+    {   // in tune across the neck, with bright/stiff and dark settings
+        double worst = 0;
+        for (int cfg = 0; cfg < 3; cfg++) {
+            GuitarParams p; p.body = 0; p.verbMix = 0;
+            if (cfg == 1) { p.bright = 1; p.stiffness = 1; } if (cfg == 2) { p.bright = 0; p.decayS = 1; }
+            for (int note : { 40, 52, 64, 76, 88 }) { auto x = render(p, { { note, 0 } }, 0.5); worst = std::max(worst, std::abs(pitch(x, (size_t)(0.1 * sr), (size_t)(0.25 * sr), GuitarDsp::noteHz(note)))); }
+        }
+        expect(worst <= 1.0, "in tune from E2 to E6 across bright, stiff and dark strings (worst " + std::to_string(worst) + " cents)");
+    }
+    {   // strum: six notes arrive together and are spread over the strum time, low to high on a down-strum
+        GuitarParams p; p.strumMs = 60; p.strumDir = 0; p.humanize = 0; p.body = 0; p.verbMix = 0;
+        std::vector<std::pair<int, int>> chord; for (int n : { 40, 47, 52, 56, 59, 64 }) chord.push_back({ n, 0 });
+        auto x = render(p, chord, 0.2);
+        int first = -1, last = -1; double pk = 0; for (float v : x) pk = std::max(pk, (double)std::abs(v));
+        for (size_t i = 0; i < x.size(); i++) if (std::abs(x[i]) > pk * 0.02) { first = (int)i; break; }
+        // the last string starts 60 ms after the first: the signal keeps gaining new energy until then
+        double e1 = 0, e2 = 0; for (int i = 0; i < (int)(0.03 * sr); i++) e1 += x[(size_t)i] * x[(size_t)i];
+        for (int i = (int)(0.06 * sr); i < (int)(0.09 * sr); i++) e2 += x[(size_t)i] * x[(size_t)i];
+        (void)last;
+        expect(first >= 0 && first < (int)(0.003 * sr), "a strum starts straight away");
+        expect(e2 > e1 * 0.8, "and is still adding strings 60 ms in (spread across the strum time)");
+    }
+    {   // a new note on the same string chokes the old one (guitar mode); free mode lets both ring
+        GuitarParams p; p.body = 0; p.verbMix = 0; p.decayS = 8;
+        auto choke = render(p, { { 64, 0 }, { 65, (int)(0.3 * sr) } }, 0.8);
+        p.mode = 1; auto free = render(p, { { 64, 0 }, { 65, (int)(0.3 * sr) } }, 0.8);
+        const size_t at = (size_t)(0.5 * sr), len = (size_t)(0.25 * sr);
+        auto level = [&](const std::vector<float>& x, double f) { double re = 0, im = 0; for (size_t i = 0; i < len; i++) { re += x[at + i] * std::cos(2 * kPi * f * i / sr); im += x[at + i] * std::sin(2 * kPi * f * i / sr); } return std::sqrt(re * re + im * im); };
+        const double e4 = GuitarDsp::noteHz(64);
+        expect(level(choke, e4) < level(free, e4) * 0.1, "guitar mode: a new note on the high E string stops the E that was ringing");
+    }
+    {   // releasing a note damps it; holding lets it ring
+        GuitarParams p; p.body = 0; p.verbMix = 0; p.decayS = 8; p.releaseS = 0.1;
+        auto held = render(p, { { 52, 0 } }, 1.0), rel = render(p, { { 52, 0 } }, 1.0, { { 52, (int)(0.3 * sr) } });
+        double eh = 0, er = 0; for (int i = (int)(0.7 * sr); i < (int)(0.9 * sr); i++) { eh += held[(size_t)i] * held[(size_t)i]; er += rel[(size_t)i] * rel[(size_t)i]; }
+        expect(er < eh * 1e-3, "letting go of a key damps the string (release)");
+    }
+    {   // nothing blows up: every choice, extreme knobs, fast notes, bends and sustain
+        bool ok = true; double pk = 0;
+        for (int amp = 0; amp <= 4; amp++) for (int course = 0; course <= 2; course++) {
+            GuitarParams p; p.amp = amp; p.course = course; p.cab = amp % 4; p.pickup = course + 1; p.body = (amp + course) % 6; p.driveDb = 40; p.bright = 1; p.stiffness = 1;
+            p.decayS = 20; p.releaseS = 5; p.chorus = 1; p.delayMix = 1; p.delayFb = 1; p.verbMix = 1; p.age = 1; p.mode = (amp + course) % 3; p.bassDb = 12; p.trebleDb = 12;
+            GuitarDsp g; g.set(p); g.prepare(sr);
+            std::vector<float> L(256), R(256);
+            for (int b = 0; b < 400; b++) {
+                if (b % 3 == 0) for (int k = 0; k < 4; k++) g.noteOn(28 + (b * 7 + k * 5) % 72, 1.0, k * 10);
+                if (b % 3 == 1) for (int k = 0; k < 4; k++) g.noteOff(28 + ((b - 1) * 7 + k * 5) % 72, 5);
+                g.pitchBend(std::sin(b * 0.1)); g.modWheel(0.5 + 0.5 * std::sin(b * 0.05)); g.sustainPedal(b % 50 < 25);
+                std::fill(L.begin(), L.end(), 0.0f); std::fill(R.begin(), R.end(), 0.0f);
+                g.process(L.data(), R.data(), 256);
+                for (int i = 0; i < 256; i++) { ok = ok && std::isfinite(L[(size_t)i]) && std::isfinite(R[(size_t)i]); pk = std::max(pk, (double)std::abs(L[(size_t)i])); }
+            }
+        }
+        expect(ok && pk < 8, "stays finite and bounded at every extreme (peak " + std::to_string(pk) + ")");
+    }
+}
+
 int main() {
-    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck();
+    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar();
     std::printf(fails ? "FAILED (%d)\n" : "ALL PASS\n", fails);
     return fails ? 1 : 0;
 }

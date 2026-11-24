@@ -52,6 +52,22 @@ struct KickTrack {
         }
     }
 };
+// For instruments: an E major / A minor chord every half second, held for 0.4 s, plus a short melody line.
+struct ChordMidi {
+    double sr = 48000; long long t = 0;
+    void fill(juce::MidiBuffer& m, int n) {
+        static const int chords[2][6] = { { 40, 47, 52, 56, 59, 64 }, { 45, 52, 57, 60, 64, 69 } };
+        const long long period = (long long)(0.5 * sr), hold = (long long)(0.4 * sr);
+        for (int i = 0; i < n; i++, t++) {
+            const long long ph = t % period, k = t / period;
+            const int* c = chords[k % 2];
+            if (ph == 0) for (int j = 0; j < 6; j++) m.addEvent(juce::MidiMessage::noteOn(1, c[j], (juce::uint8)(70 + (k * 13 + j * 7) % 50)), i);
+            if (ph == hold) for (int j = 0; j < 6; j++) m.addEvent(juce::MidiMessage::noteOff(1, c[j]), i);
+            if (ph == period / 2 && k % 3 == 2) m.addEvent(juce::MidiMessage::noteOn(1, 76 + (int)(k % 5), (juce::uint8)100), i);
+            if (ph == period - 10 && k % 3 == 2) m.addEvent(juce::MidiMessage::noteOff(1, 76 + (int)(k % 5)), i);
+        }
+    }
+};
 // A transport that plays at 120 BPM.
 struct TestHead : juce::AudioPlayHead {
     double ppq = 0; bool playing = true;
@@ -60,10 +76,11 @@ struct TestHead : juce::AudioPlayHead {
 
 double run(juce::AudioProcessor& p, double sr, int chans, std::function<int()> blockSize, double seconds, bool fuzz, float& peak) {
     auto lay = p.getBusesLayout();
-    lay.inputBuses.getReference(0) = lay.outputBuses.getReference(0) = chans == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo();
+    if (!lay.inputBuses.isEmpty()) lay.inputBuses.getReference(0) = chans == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo();
+    lay.outputBuses.getReference(0) = chans == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo();
     check(p.setBusesLayout(lay), "layout " + juce::String(chans) + " ch");
     p.prepareToPlay(sr, 1024);
-    Signal sig; sig.sr = sr; juce::Random rng{ 3 }; KickTrack kick; kick.sr = sr;
+    Signal sig; sig.sr = sr; juce::Random rng{ 3 }; KickTrack kick; kick.sr = sr; ChordMidi notes; notes.sr = sr;
     const int bufCh = juce::jmax(p.getTotalNumInputChannels(), p.getTotalNumOutputChannels());   // includes any sidechain
     juce::AudioBuffer<float> buf(bufCh, 1024); juce::MidiBuffer midi;
     const long long N = (long long)(seconds * sr); long long done = 0; double busy = 0;
@@ -73,6 +90,7 @@ double run(juce::AudioProcessor& p, double sr, int chans, std::function<int()> b
         if (fuzz) for (auto* prm : params) if (rng.nextFloat() < 0.15f) prm->setValueNotifyingHost(rng.nextFloat());
         sig.fill(buf, n);
         if (bufCh > chans) kick.fill(buf, chans, n);
+        midi.clear(); if (p.acceptsMidi()) notes.fill(midi, n);
         juce::AudioBuffer<float> view(buf.getArrayOfWritePointers(), bufCh, n);
         const auto t0 = std::chrono::steady_clock::now();
         p.processBlock(view, midi);
@@ -91,6 +109,48 @@ void setDefaults(juce::AudioProcessor& p) { for (auto* prm : p.getParameters()) 
 
 // Benchmark: every preset, 6 s each at 48 kHz / 512, with a running transport and a kick on any sidechain.
 // Prints CPU per preset (best of 3 runs) and writes the exact output to `outFile` so builds can be compared.
+// Demo renders (instruments): every preset plays a short phrase (strummed chords, or a melody for legato presets)
+// and is written as a WAV into `dir`.
+int demos(const juce::String& dir) {
+    std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
+    auto* lp = dynamic_cast<lgn::Processor*>(p.get());
+    if (!lp || !p->acceptsMidi()) return 1;
+    const double sr = 48000, bpm = 90, beat = 60.0 / bpm; const int B = 256;
+    juce::File out(juce::File::getCurrentWorkingDirectory().getChildFile(dir)); out.createDirectory();
+    struct Ev { double t; int note; bool on; };
+    std::vector<Ev> chords, melody;
+    const std::vector<std::vector<int>> prog = { { 43, 47, 50, 55, 59, 67 }, { 40, 47, 52, 55, 59, 64 }, { 48, 52, 55, 60, 64 }, { 50, 57, 62, 66 } };
+    const double pat[] = { 0, 1, 1.5, 2.5, 3, 3.5 };
+    for (int bar = 0; bar < 4; bar++) for (double q : pat) for (int n : prog[(size_t)bar]) { const double t = bar * 4 * beat + q * beat; chords.push_back({ t, n, true }); chords.push_back({ t + beat * 0.45, n, false }); }
+    for (int n : prog[0]) { chords.push_back({ 16 * beat, n, true }); chords.push_back({ 19 * beat, n, false }); }
+    const int mel[] = { 64, 67, 69, 71, 74, 71, 69, 67, 69, 71, 72, 71, 69, 67, 64, 67 };
+    for (int k = 0; k < 16; k++) { const double t = k * beat * 0.5 + (k >= 8 ? beat : 0); melody.push_back({ t, mel[k], true }); melody.push_back({ t + beat * (k == 7 || k == 15 ? 1.4 : 0.48), mel[k], false }); }
+    for (auto* v : { &chords, &melody }) std::sort(v->begin(), v->end(), [](const Ev& a, const Ev& b) { return a.t < b.t || (a.t == b.t && !a.on && b.on); });
+    for (int i = 1; i < lp->getNumPrograms(); i++) {
+        lp->setCurrentProgram(i);
+        const bool legato = juce::roundToInt(lp->p("mode")) == 2;
+        const auto& ev = legato ? melody : chords;
+        p->setRateAndBufferSizeDetails(sr, B); TestHead head; head.playing = true; p->setPlayHead(&head); p->prepareToPlay(sr, B);
+        const int N = (int)(sr * (legato ? 10 * beat : 21 * beat));
+        juce::AudioBuffer<float> all(2, N), buf(2, B); juce::MidiBuffer midi; size_t e = 0;
+        for (int o = 0; o < N; o += B) {
+            const int m = std::min(B, N - o); midi.clear();
+            while (e < ev.size() && ev[e].t * sr < o + m) { const int off = std::max(0, (int)(ev[e].t * sr) - o); midi.addEvent(ev[e].on ? juce::MidiMessage::noteOn(1, ev[e].note, (juce::uint8)96) : juce::MidiMessage::noteOff(1, ev[e].note), off); e++; }
+            juce::AudioBuffer<float> view(buf.getArrayOfWritePointers(), 2, m);
+            p->processBlock(view, midi); head.ppq += m * bpm / 60.0 / sr;
+            for (int c = 0; c < 2; c++) all.copyFrom(c, o, view, c, 0, m);
+        }
+        p->releaseResources(); p->setPlayHead(nullptr);
+        const auto name = lp->presets()[(size_t)i].category + " - " + lp->getProgramName(i);
+        auto f = out.getChildFile(juce::String(i).paddedLeft('0', 2) + " " + name.replaceCharacters("/&", "-+") + ".wav"); f.deleteFile();
+        std::unique_ptr<juce::OutputStream> os(f.createOutputStream().release());
+        juce::WavAudioFormat wav;
+        if (auto* w = wav.createWriterFor(os.get(), sr, 2, 24, {}, 0)) { os.release(); std::unique_ptr<juce::AudioFormatWriter> wr(w); wr->writeFromAudioSampleBuffer(all, 0, N); }
+        std::cout << "  " << f.getFileName() << "\n";
+    }
+    return 0;
+}
+
 int bench(const juce::String& outFile) {
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     auto* lp = dynamic_cast<lgn::Processor*>(p.get());
@@ -106,10 +166,11 @@ int bench(const juce::String& outFile) {
             p->setRateAndBufferSizeDetails(sr, B);
             TestHead head; p->setPlayHead(&head);
             p->prepareToPlay(sr, B);
-            Signal sig; KickTrack kick; juce::AudioBuffer<float> buf(juce::jmax(2, p->getTotalNumInputChannels()), B); juce::MidiBuffer midi;
+            Signal sig; KickTrack kick; ChordMidi cm; juce::AudioBuffer<float> buf(juce::jmax(2, p->getTotalNumInputChannels()), B); juce::MidiBuffer midi;
             double busy = 0;
             for (int k = 0; k < blocks; k++) {
                 sig.fill(buf, B); if (buf.getNumChannels() > 2) kick.fill(buf, 2, B);
+                midi.clear(); if (p->acceptsMidi()) cm.fill(midi, B);
                 const auto t0 = std::chrono::steady_clock::now();
                 p->processBlock(buf, midi);
                 busy += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -132,6 +193,7 @@ int bench(const juce::String& outFile) {
 int main(int argc, char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 2 && juce::String(argv[1]) == "--bench") return bench(argv[2]);
+    if (argc > 2 && juce::String(argv[1]) == "--demos") return demos(argv[2]);
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     const juce::String name = p->getName();
     std::cout << name << ": " << p->getParameters().size() << " parameters\n";
@@ -182,10 +244,11 @@ int main(int argc, char** argv) {
             // loudness change: RMS out vs in over 3 s of the test signal (after a 1 s settle)
             double si = 0, so = 0;
             {
-                lp->prepareToPlay(48000, 512); Signal sg; KickTrack kt; TestHead head; lp->setPlayHead(&head);
+                lp->prepareToPlay(48000, 512); Signal sg; KickTrack kt; ChordMidi cm; TestHead head; lp->setPlayHead(&head);
                 juce::AudioBuffer<float> b(juce::jmax(2, lp->getTotalNumInputChannels()), 512); juce::MidiBuffer m;
                 for (int k = 0; k < 375; k++) {
                     sg.fill(b, 512); if (b.getNumChannels() > 2) kt.fill(b, 2, 512); head.ppq += 512 * 2.0 / 48000;
+                    m.clear(); if (lp->acceptsMidi()) cm.fill(m, 512);
                     const double ei = b.getRMSLevel(0, 0, 512); lp->processBlock(b, m); const double eo = b.getRMSLevel(0, 0, 512);
                     if (k >= 94) { si += ei * ei; so += eo * eo; }
                 }
@@ -206,7 +269,8 @@ int main(int argc, char** argv) {
         const juce::File dir(juce::File::getCurrentWorkingDirectory().getChildFile(argc > 1 ? argv[1] : "snapshots"));
         dir.createDirectory();
         auto lay = p->getBusesLayout();
-        lay.inputBuses.getReference(0) = lay.outputBuses.getReference(0) = juce::AudioChannelSet::stereo();
+        if (!lay.inputBuses.isEmpty()) lay.inputBuses.getReference(0) = juce::AudioChannelSet::stereo();
+        lay.outputBuses.getReference(0) = juce::AudioChannelSet::stereo();
         p->setBusesLayout(lay);
         using Settings = std::vector<std::pair<const char*, float>>;
         // a few settings per plugin so the snapshot shows the plugin doing something; some plugins get two shots
@@ -220,6 +284,7 @@ int main(int argc, char** argv) {
             { "LGN Delay", { { "", { { "feedback", 55 }, { "mix", 30 } } } } },
             { "LGN Limiter", { { "", { { "input", 9 }, { "ceiling", -0.5f } } } } },
             { "LGN Gravity", { { "", { { "key", 9 }, { "scale", 1 }, { "pull", 85 } } } } },
+            { "LGN Fret", { { "", { { "pickup", 1 }, { "pupos", 40 }, { "amp", 1 }, { "cab", 1 }, { "body", 0 }, { "chorus", 25 }, { "vmix", 22 } } } } },
             { "LGN Duck", { { "-tempo", { { "mode", 0 }, { "rate", 2 }, { "amount", 80 }, { "release", 55 } } },
                             { "-kick", { { "mode", 1 }, { "amount", 85 }, { "release", 30 } } } } } };
         std::vector<std::pair<juce::String, Settings>> shots{ { "", {} } };
@@ -233,9 +298,10 @@ int main(int argc, char** argv) {
             p->prepareToPlay(48000, 512);
             std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
             check(ed != nullptr, "editor");
-            Signal sig; KickTrack kick; juce::AudioBuffer<float> buf(juce::jmax(2, p->getTotalNumInputChannels()), 512); juce::MidiBuffer midi;
+            Signal sig; KickTrack kick; ChordMidi cm; juce::AudioBuffer<float> buf(juce::jmax(2, p->getTotalNumInputChannels()), 512); juce::MidiBuffer midi;
             for (int k = 0; k < 280; k++) {
                 sig.fill(buf, 512, 0.35f); if (buf.getNumChannels() > 2) kick.fill(buf, 2, 512);
+                midi.clear(); if (p->acceptsMidi()) cm.fill(midi, 512);
                 p->processBlock(buf, midi); head.ppq += 512 * 2.0 / 48000;
                 if (k % 3 == 0) { juce::Thread::sleep(3); juce::Timer::callPendingTimersSynchronously(); }
             }

@@ -190,6 +190,86 @@ DUCK = [
     ("Kick", "Mix Bus Bounce",      dk(1, 30, 35)),
 ]
 
+# ---------------------------------------------------------------- Fret (guitar)
+# choices: mode 0 Guitar 1 Free 2 Legato | strumdir 0 Down 1 Up 2 Alt | pick 0 Pick 1 Finger 2 Thumb | course 0 Single 1 Double 2 12-String
+#          body 0 None 1 Dreadnought 2 Parlor 3 Classical 4 Jumbo 5 Archtop | pickup 0 Off 1 Single 2 Humbucker 3 Piezo
+#          amp 0 Off 1 Clean 2 Crunch 3 Lead 4 Fuzz | cab 0 Off 1 1x12 2 2x12 3 4x12 | ddiv 0 1/16 1 1/8T 2 1/8 3 1/8D 4 1/4T 5 1/4 6 1/4D 7 1/2
+#          tuning 0 Standard 1 Drop D 2 Half Down 3 Open D 4 DADGAD 5 Open G
+ACOUSTIC = dict(body=1, pickup=0, amp=0, cab=0, vmix=15)
+NYLON = dict(body=3, pick=1, bright=42, stiff=5, noise=12, hard=45, pickup=0, amp=0, cab=0)
+ELECTRIC = dict(body=0, pickup=1, pupos=50, amp=1, drive=6, cab=1, vmix=15, noise=20)
+def fr(base, **kw): d = dict(base); d.update(kw); return d
+FRET = [
+    ("Acoustic", "Steel Strummer",        fr(ACOUSTIC, strum=35, release=0.6, bright=60, decay=5)),
+    ("Acoustic", "Campfire Dreadnought",  fr(ACOUSTIC, bodyamt=85, bright=55, strum=45, humanize=45, release=0.8, vmix=10)),
+    ("Acoustic", "Bright Jumbo",          fr(ACOUSTIC, body=4, bright=72, decay=6, noise=40, release=0.7)),
+    ("Acoustic", "Parlor Fingerpicking",  fr(ACOUSTIC, body=2, pick=1, hard=45, pickpos=22, strum=0, release=1.2, bright=50, vmix=18)),
+    ("Acoustic", "Pop Acoustic",          fr(ACOUSTIC, bright=68, hard=70, decay=4, release=0.5, chorus=10, vmix=16, width=75)),
+    ("Acoustic", "Muted Acoustic Rhythm", fr(ACOUSTIC, mute=45, release=0.15, strum=25, bright=55, vmix=10)),
+    ("Acoustic", "Soft Fingerstyle",      fr(ACOUSTIC, pick=1, hard=35, bright=45, decay=6, release=1.5, vmix=22, strum=0)),
+    ("Acoustic", "DADGAD Drone",          fr(ACOUSTIC, tuning=4, release=2, decay=8, vmix=25, vsize=70)),
+    ("Acoustic", "Open G Slide",          fr(ACOUSTIC, tuning=5, mode=2, glide=120, vib=12, decay=6, release=1, bright=58)),
+    ("Acoustic", "Bedroom Demo",          fr(ACOUSTIC, body=2, bright=50, hard=50, release=0.5, vmix=8, age=15)),
+    ("Nylon", "Classical Nylon",          fr(NYLON, decay=4, release=1, vmix=20)),
+    ("Nylon", "Bossa Thumb",              fr(NYLON, pick=2, bright=38, hard=40, release=0.4, strum=25, vmix=14)),
+    ("Nylon", "Flamenco Bright",          fr(NYLON, bright=62, hard=80, strum=18, humanize=50, noise=25, release=0.5, vmix=16)),
+    ("Nylon", "Lo-Fi Nylon Loop",         fr(NYLON, bright=35, age=55, vmix=18, release=0.8)),
+    ("Nylon", "Spanish Lead",             fr(NYLON, mode=2, bright=50, vib=8, vibrate=5, glide=40, release=0.8, vmix=20)),
+    ("Nylon", "Nylon Wash",               fr(NYLON, bright=40, decay=10, release=3, vmix=45, vsize=85, chorus=20, dmix=18, ddiv=3)),
+    ("Clean Electric", "Glassy Single Coil", fr(ELECTRIC, bright=62, treble=2)),
+    ("Clean Electric", "Neo-Soul Chorus",    fr(ELECTRIC, pupos=30, drive=5, chorus=45, chrate=0.6, vmix=22, pick=1, hard=50, bright=55, strum=20)),
+    ("Clean Electric", "Funk Scratch",       fr(ELECTRIC, pupos=85, mute=25, release=0.06, bright=75, hard=80, drive=8, treble=3, mid=2, strum=8, vmix=8)),
+    ("Clean Electric", "Clean Twin Reverb",  fr(ELECTRIC, pupos=60, drive=4, cab=2, vmix=30, vsize=55, treble=2, bright=60)),
+    ("Clean Electric", "Bridge Twang",       fr(ELECTRIC, pupos=100, drive=10, bright=72, treble=3, mid=2, vmix=12, dmix=12, ddiv=2, dfb=10)),
+    ("Clean Electric", "Jazz Box",           fr(ELECTRIC, body=5, bodyamt=35, pickup=2, pupos=0, drive=4, bright=35, treble=-4, bass=2, pick=2, vmix=14)),
+    ("Clean Electric", "Clean Arpeggio Delay", fr(ELECTRIC, pupos=40, dmix=28, ddiv=3, dfb=38, vmix=25, chorus=15)),
+    ("Clean Electric", "Warm Neck Pickup",   fr(ELECTRIC, pickup=2, pupos=0, bright=48, bass=2, treble=-2, vmix=18)),
+    ("Crunch", "Blues Crunch",            fr(ELECTRIC, pickup=2, pupos=70, amp=2, drive=18, cab=2, mid=2, vmix=12)),
+    ("Crunch", "Classic Rock Rhythm",     fr(ELECTRIC, pickup=2, pupos=100, amp=2, drive=24, cab=3, course=1, detune=6, width=90, mid=1, vmix=10)),
+    ("Crunch", "Indie Jangle Crunch",     fr(ELECTRIC, pupos=80, amp=2, drive=12, chorus=15, vmix=18, bright=66)),
+    ("Crunch", "Palm Mute Chug",          fr(ELECTRIC, pickup=2, pupos=100, amp=2, drive=26, cab=3, mute=55, release=0.05, strum=6, bass=3, vmix=6)),
+    ("Crunch", "Punk Power",              fr(ELECTRIC, pickup=2, pupos=100, amp=2, drive=28, cab=3, course=1, width=100, strum=10, vmix=8)),
+    ("Crunch", "Edge of Breakup",         fr(ELECTRIC, pupos=60, amp=2, drive=10, vmix=16)),
+    ("Lead", "Singing Lead",              fr(ELECTRIC, mode=2, glide=50, vib=10, vibrate=5.5, pickup=2, pupos=0, amp=3, drive=30, cab=3, dmix=22, ddiv=3, dfb=35, vmix=18, decay=10, release=0.5)),
+    ("Lead", "Shred Lead",                fr(ELECTRIC, mode=2, glide=25, pickup=2, pupos=100, amp=3, drive=36, cab=3, dmix=12, vmix=12, mid=3)),
+    ("Lead", "Blues Lead",                fr(ELECTRIC, mode=2, glide=70, vib=14, vibrate=5, pickup=2, pupos=40, amp=2, drive=22, cab=2, vmix=16)),
+    ("Lead", "Slide Lead",                fr(ELECTRIC, mode=2, glide=160, vib=8, pupos=80, amp=2, drive=18, vmix=22, bright=58)),
+    ("Lead", "Fuzz Lead",                 fr(ELECTRIC, mode=2, glide=40, pickup=2, pupos=0, amp=4, drive=30, cab=2, dmix=18, ddiv=3)),
+    ("Lead", "80s Chorus Lead",           fr(ELECTRIC, mode=2, pickup=2, pupos=100, amp=3, drive=28, cab=3, chorus=40, dmix=25, ddiv=3, dfb=40, vmix=30)),
+    ("Lead", "Drop D Metal Rhythm",       fr(ELECTRIC, tuning=1, pickup=2, pupos=100, amp=3, drive=34, cab=3, mute=35, release=0.05, bass=3, mid=-2, treble=2, course=1, width=100, strum=4, vmix=6)),
+    ("Lo-Fi & Soul", "Dusty Soul Sample",  fr(ELECTRIC, pupos=20, drive=8, age=60, vmix=20, chorus=10, bright=45, release=0.4)),
+    ("Lo-Fi & Soul", "Rainy Window Nylon", fr(NYLON, age=45, vmix=25, bright=38, release=1, strum=50)),
+    ("Lo-Fi & Soul", "70s Soul Rhythm",    fr(ELECTRIC, pupos=90, drive=10, mute=15, release=0.1, treble=3, age=25, vmix=12)),
+    ("Lo-Fi & Soul", "Vinyl Jazz Chords",  fr(ELECTRIC, body=5, bodyamt=40, pickup=2, pupos=0, pick=2, age=55, vmix=18, bright=35)),
+    ("Lo-Fi & Soul", "Tape-Warped Acoustic", fr(ACOUSTIC, age=75, vmix=18, chorus=15)),
+    ("Lo-Fi & Soul", "Bedroom Lo-Fi Clean", fr(ELECTRIC, pupos=30, age=40, chorus=25, vmix=25)),
+    ("Lo-Fi & Soul", "Boom Bap Loop",      fr(ELECTRIC, pickup=2, pupos=0, drive=12, age=50, mute=10, release=0.3, vmix=10, bright=40)),
+    ("Ambient", "Shimmer Swell",          fr(ELECTRIC, pupos=40, decay=14, release=4, vmix=55, vsize=95, dmix=30, ddiv=6, dfb=55, chorus=25, hard=30, pick=1, strum=80)),
+    ("Ambient", "Endless Pad",            fr(ACOUSTIC, pick=1, hard=25, decay=18, release=5, vmix=65, vsize=100, dmix=35, ddiv=7, dfb=60, chorus=30)),
+    ("Ambient", "Dreamy Arps",            fr(ELECTRIC, dmix=35, ddiv=3, dfb=50, vmix=40, vsize=80, chorus=35)),
+    ("Ambient", "Post-Rock Wall",         fr(ELECTRIC, pickup=2, amp=2, drive=20, cab=3, dmix=30, ddiv=3, dfb=55, vmix=55, vsize=95, course=1, width=100)),
+    ("Ambient", "Glass Harmonics",        fr(ELECTRIC, pickup=3, amp=0, cab=0, bright=85, stiff=40, pickpos=6, hard=30, pick=1, decay=12, release=3, vmix=50, chorus=20)),
+    ("Ambient", "Night Drive",            fr(ELECTRIC, pupos=30, cab=2, chorus=40, dmix=25, ddiv=3, vmix=40, age=15)),
+    ("Trap & Rage", "Trap Guitar Loop",   fr(ELECTRIC, pupos=40, chorus=20, vmix=30, vsize=60, age=20, dmix=15, ddiv=3, bright=55, strum=25)),
+    ("Trap & Rage", "Sad Trap Acoustic",  fr(ACOUSTIC, pick=1, hard=40, vmix=30, age=25, bright=50, release=0.8, strum=40, chorus=10)),
+    ("Trap & Rage", "Melodic Drill Guitar", fr(ELECTRIC, dmix=22, ddiv=1, dfb=40, vmix=28, age=10, pick=1, hard=55)),
+    ("Trap & Rage", "Rage Fuzz Guitar",   fr(ELECTRIC, amp=4, drive=32, cab=3, pickup=2, pupos=100, course=1, width=100, vmix=20, mid=-2)),
+    ("Trap & Rage", "Rage Stab",          fr(ELECTRIC, pickup=2, pupos=100, amp=3, drive=30, cab=3, mute=30, release=0.1, dmix=20, ddiv=2, vmix=15)),
+    ("Trap & Rage", "Astro Wash",         fr(ELECTRIC, chorus=50, chrate=0.4, dmix=30, ddiv=3, dfb=45, vmix=50, vsize=85, age=20, width=95)),
+    ("Trap & Rage", "Pluggnb Clean",      fr(ELECTRIC, pupos=30, chorus=30, vmix=35, bright=60, release=0.6, dmix=12)),
+    ("Trap & Rage", "Dark Trap Nylon",    fr(NYLON, bright=35, age=30, vmix=35, vsize=70, dmix=15, ddiv=3, release=1)),
+    ("12-String & Doubles", "Jangle 12-String",   fr(ACOUSTIC, course=2, detune=5, bright=66, vmix=18, strum=40)),
+    ("12-String & Doubles", "Electric 12-String", fr(ELECTRIC, course=2, pupos=70, chorus=10, vmix=18, bright=64)),
+    ("12-String & Doubles", "Doubled Wall Acoustic", fr(ACOUSTIC, course=1, detune=9, width=100, body=4, vmix=16)),
+    ("12-String & Doubles", "Folk 12-String",     fr(ACOUSTIC, course=2, detune=4, body=4, bright=60, release=1.0, strum=55, humanize=50)),
+    ("12-String & Doubles", "Chorus Doubles Clean", fr(ELECTRIC, course=1, chorus=30, width=100, vmix=22)),
+]
+
+# Preset volumes, measured: each preset was rendered playing a strummed progression (or a melody, for the legato
+# presets; host_test --demos) and its volume set so every preset has the same average loudness, peaks <= -1 dBFS.
+FRET_VOLUME = {'Steel Strummer': 2.0, 'Campfire Dreadnought': 3.0, 'Bright Jumbo': 1.5, 'Parlor Fingerpicking': -2.5, 'Pop Acoustic': 3.0, 'Muted Acoustic Rhythm': 4.0, 'Soft Fingerstyle': -3.5, 'DADGAD Drone': 0.5, 'Open G Slide': 6.5, 'Bedroom Demo': 1.5, 'Classical Nylon': -2.0, 'Bossa Thumb': -4.5, 'Flamenco Bright': -1.0, 'Lo-Fi Nylon Loop': -3.0, 'Spanish Lead': 3.0, 'Nylon Wash': -3.0, 'Glassy Single Coil': -1.5, 'Neo-Soul Chorus': -4.0, 'Funk Scratch': -3.0, 'Clean Twin Reverb': 0.0, 'Bridge Twang': -0.5, 'Jazz Box': -10.0, 'Clean Arpeggio Delay': 0.0, 'Warm Neck Pickup': -5.0, 'Blues Crunch': -2.0, 'Classic Rock Rhythm': -4.5, 'Indie Jangle Crunch': 3.0, 'Palm Mute Chug': -2.0, 'Punk Power': -5.5, 'Edge of Breakup': 1.5, 'Singing Lead': -5.0, 'Shred Lead': -5.5, 'Blues Lead': 0.0, 'Slide Lead': 6.0, 'Fuzz Lead': -1.5, '80s Chorus Lead': 1.0, 'Drop D Metal Rhythm': -4.5, 'Dusty Soul Sample': -3.0, 'Rainy Window Nylon': -2.5, '70s Soul Rhythm': 1.0, 'Vinyl Jazz Chords': -10.0, 'Tape-Warped Acoustic': 1.5, 'Bedroom Lo-Fi Clean': -1.5, 'Boom Bap Loop': -5.5, 'Shimmer Swell': -5.0, 'Endless Pad': -4.0, 'Dreamy Arps': 1.0, 'Post-Rock Wall': -2.5, 'Glass Harmonics': -5.5, 'Night Drive': 0.5, 'Trap Guitar Loop': -1.5, 'Sad Trap Acoustic': -2.0, 'Melodic Drill Guitar': -4.0, 'Rage Fuzz Guitar': -2.5, 'Rage Stab': -2.5, 'Astro Wash': 1.5, 'Pluggnb Clean': -0.5, 'Dark Trap Nylon': -2.0, 'Jangle 12-String': -0.5, 'Electric 12-String': -2.0, 'Doubled Wall Acoustic': 0.0, 'Folk 12-String': 0.5, 'Chorus Doubles Clean': -3.5}
+for _c, _n, _v in FRET: _v.setdefault("volume", FRET_VOLUME.get(_n, 0.0))
+
 PLUGINS = {
     "eq": (EQ, ["spectrum"]),
     "comp": (COMP, []),
@@ -200,6 +280,7 @@ PLUGINS = {
     "limit": (LIMIT, []),
     "gravity": (GRAVITY, ["key", "scale"]),
     "duck": (DUCK, []),
+    "fret": (FRET, []),
 }
 
 def num(x):

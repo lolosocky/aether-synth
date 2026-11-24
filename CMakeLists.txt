@@ -66,3 +66,15 @@ target_include_directories(aether_plugin_test PRIVATE src third_party)
 target_compile_definitions(aether_plugin_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JucePlugin_Name="Aether")
 target_link_libraries(aether_plugin_test PRIVATE AetherData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
 set_target_properties(aether_plugin_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+# CPU of the real plugin processor per preset (engine + convolution + output chain).
+juce_add_console_app(aether_plugin_perf)
+target_sources(aether_plugin_perf PRIVATE tests/plugin_perf.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp plugin/Hardware.cpp)
+target_include_directories(aether_plugin_perf PRIVATE src third_party)
+target_compile_definitions(aether_plugin_perf PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JucePlugin_Name="Aether")
+target_link_libraries(aether_plugin_perf PRIVATE AetherData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+set_target_properties(aether_plugin_perf PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+# Engine stress test (no JUCE): CPU, voices cut while audible, and output glitches for every preset.
+add_executable(aether_perf_test EXCLUDE_FROM_ALL tests/perf_test.cpp)
+target_include_directories(aether_perf_test PRIVATE src third_party)

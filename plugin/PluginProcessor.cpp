@@ -84,7 +84,7 @@ void AetherProcessor::scheduleCrate() { crateDebounce = 3; }
 
 void AetherProcessor::repressCrate() { crateSeed = crateSeed * 1664525u + 1013904223u; crateKey.clear(); scheduleCrate(); }
 
-void AetherProcessor::timerCallback() { pumpCrate(false); }
+void AetherProcessor::timerCallback() { pumpCrate(false); conv.collectGarbage(); }
 
 void AetherProcessor::pumpCrate(bool force) {
     { const juce::SpinLock::ScopedLockType sl(crateLock); crateRetired.clear(); }    // free old loops here, never on the audio thread
@@ -201,9 +201,7 @@ void AetherProcessor::updateIR(const aether::Patch& p) {
     if (key == irKey && irSr == sr) return;
     irKey = key; irSr = sr;
     std::vector<float> L, R; aether::makeIR(r.type, r.decay, r.size, r.damp, sr, L, R);
-    juce::AudioBuffer<float> ir(2, (int)L.size());
-    ir.copyFrom(0, 0, L.data(), (int)L.size()); ir.copyFrom(1, 0, R.data(), (int)R.size());
-    conv.loadImpulseResponse(std::move(ir), sr, juce::dsp::Convolution::Stereo::yes, juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
+    conv.setImpulse(L, R);
 }
 
 void AetherProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
@@ -213,11 +211,11 @@ void AetherProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
     setLatencySamples(post.latency());   // the output limiter looks ahead ~1.5 ms; the host compensates
     const int n = juce::jmax(64, samplesPerBlock); maxBlock = n;
     bufL.assign((size_t)n, 0.0f); bufR.assign((size_t)n, 0.0f); sendL.assign((size_t)n, 0.0f); sendR.assign((size_t)n, 0.0f);
-    conv.prepare({ sampleRate, (juce::uint32)n, 2 });
+    conv.prepare(sampleRate, n); revWasOn = false;
     { const juce::SpinLock::ScopedLockType sl(crateLock); crateRetired.reserve(16); }
     cratePlayer.stopAll();
     aether::Patch p; { const juce::ScopedLock sl(infoLock); p = aether::patchFromJson(curPatch); }
-    updateIR(p);
+    irKey.clear(); updateIR(p);   // prepare() starts the convolver empty, so always reload the response
 }
 
 void AetherProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
@@ -319,10 +317,9 @@ void AetherProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
         float* sl = sendL.data() + off; float* sr2 = sendR.data() + off;
         post.stage1(live, engine.fxm, engine.bpm, L + off, R + off, sl, sr2, m, pocket);
         if (live.fx.rev.on) {
-            float* ch[2] = { sl, sr2 };
-            juce::dsp::AudioBlock<float> block(ch, 2, (size_t)m);
-            conv.process(juce::dsp::ProcessContextReplacing<float>(block));
-        } else { std::fill(sl, sl + m, 0.0f); std::fill(sr2, sr2 + m, 0.0f); }
+            if (!revWasOn) { conv.reset(); revWasOn = true; }   // no stale tail from before the reverb was switched off
+            conv.process(sl, sr2, m);
+        } else { std::fill(sl, sl + m, 0.0f); std::fill(sr2, sr2 + m, 0.0f); revWasOn = false; }
         post.stage2(live, engine.fxm, pVol->load() * std::pow(10.0, secGain / 20), L + off, R + off, sl, sr2, m);
     }
 

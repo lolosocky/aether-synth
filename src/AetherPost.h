@@ -90,20 +90,28 @@ inline void makeIR(int type, double decayIn, double sizeIn, double dampIn, doubl
 // averaged over the same window: the gain is already down when a peak leaves the delay line, so transients and stacked
 // chords never overshoot the ceiling into the soft clip. Latency = W samples (about 1.5 ms), reported to the host.
 struct Brickwall {
-    int W = 64, pos = 0, rp = 0; double ceil = 0.84, relC = 0, env = 1, sum = 0; std::vector<float> dL, dR; std::vector<double> req, mins;
+    int W = 64, pos = 0; double ceil = 0.84, relC = 0, env = 1, sum = 0; std::vector<float> dL, dR; std::vector<double> mins;
+    // sliding-window minimum of the required gain over the last W + 1 samples, as a monotonic queue: O(1) per sample
+    // instead of rescanning the whole window (identical result)
+    std::vector<double> qv; std::vector<long long> qi; int qh = 0, qt = 0, qn = 0; long long t = 0;
     void prepare(double sr) {
         W = std::max(8, (int)std::lround(0.0015 * sr)); relC = 1 - std::exp(-1 / (0.08 * sr));
-        dL.assign((size_t)W, 0.0f); dR.assign((size_t)W, 0.0f); req.assign((size_t)W + 1, 1.0); mins.assign((size_t)W, 1.0); reset();
+        dL.assign((size_t)W, 0.0f); dR.assign((size_t)W, 0.0f); mins.assign((size_t)W, 1.0);
+        qv.assign((size_t)W + 2, 1.0); qi.assign((size_t)W + 2, 0); reset();
     }
-    void reset() { std::fill(dL.begin(), dL.end(), 0.0f); std::fill(dR.begin(), dR.end(), 0.0f); std::fill(req.begin(), req.end(), 1.0); std::fill(mins.begin(), mins.end(), 1.0); env = 1; sum = (double)W; pos = rp = 0; gr = 0; }
+    void reset() { std::fill(dL.begin(), dL.end(), 0.0f); std::fill(dR.begin(), dR.end(), 0.0f); std::fill(mins.begin(), mins.end(), 1.0); env = 1; sum = (double)W; pos = 0; gr = 0; qh = qt = qn = 0; t = 0; }
     int latency() const { return W; }
     double gr = 0;   // deepest gain reduction in the last block, dB (for metering)
     void process(float* L, float* R, int n) {
-        double deepest = 1;
+        double deepest = 1; const int Q = W + 2;
         for (int i = 0; i < n; i++) {
             const double a = std::max(std::abs((double)L[i]), std::abs((double)R[i]));
-            req[(size_t)rp] = a > ceil ? ceil / a : 1.0; rp = (rp + 1) % (W + 1);
-            double m = 1; for (int k = 0; k <= W; k++) m = std::min(m, req[(size_t)k]);  // min over the lookahead window (W + 1 samples)
+            const double req = a > ceil ? ceil / a : 1.0;
+            while (qn > 0) { const int b = (qt + Q - 1) % Q; if (qv[(size_t)b] >= req) { qt = b; qn--; } else break; }
+            qv[(size_t)qt] = req; qi[(size_t)qt] = t; qt = (qt + 1) % Q; qn++;
+            while (qi[(size_t)qh] <= t - (W + 1)) { qh = (qh + 1) % Q; qn--; }
+            t++;
+            const double m = std::min(1.0, qv[(size_t)qh]);                                // min over the lookahead window (W + 1 samples)
             env = m < env ? m : env + (1 - env) * relC;                                    // instant down, smooth release
             if (env > m) env = m;
             sum += env - mins[(size_t)pos]; mins[(size_t)pos] = env;                       // running average of the held gain

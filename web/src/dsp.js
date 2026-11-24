@@ -5,6 +5,7 @@ const TAU = Math.PI * 2, CB = 32, TBL = 2048, TMASK = 2047, NLEV = 18;
 const MIPH = [];
 for (let i = 0; i < NLEV; i++) MIPH.push(Math.max(1, Math.floor(512 * Math.pow(2, -i / 2))));
 const VOICE_GAIN = 0.3, POOL = 20;
+const STEAL_FADE = 0.015;   // seconds; how fast a voice taken for a new note fades out (4 ms was an audible click)
 
 let _s = 0x2545F491 | 0;
 function rnd() { _s ^= _s << 13; _s ^= _s >>> 17; _s ^= _s << 5; return (_s >>> 0) / 4294967296; }
@@ -480,7 +481,7 @@ class LayerVoice {
 
 class Voice {
   constructor(e) {
-    this.e = e; this.active = false; this.gate = false; this.fading = false; this.fadeG = 1;
+    this.e = e; this.active = false; this.gate = false; this.fading = false; this.fadeG = 1; this.fadeT = 0.004;
     this.note = 60; this.vel = 0.8; this.age = 0; this.pitch = 60; this.target = 60; this.rand = 0; this.alt = 1;
     this.lay = [new LayerVoice(), new LayerVoice(), new LayerVoice(), new LayerVoice()];
     this.m0 = new Env(); this.m1 = new Env();
@@ -549,7 +550,12 @@ class Voice {
     this.gate = false; this.m0.off(); this.m1.off();
     for (let li = 0; li < 4; li++) { const lv = this.lay[li]; lv.aenv.off(); lv.fenv.off(); }
   }
-  startFade() { this.fading = true; this.fadeG = 1; this.gate = false; }
+  startFade(secs = 0.004) { this.fading = true; this.fadeG = 1; this.fadeT = secs; this.gate = false; }
+  level() {   // current loudness estimate (envelope x layer level), for picking which voice to steal
+    const P = this.e.patch; let m = 0;
+    for (let i = 0; i < 4; i++) if (!this.lay[i].done && P.L[i].on) m = Math.max(m, this.lay[i].aenv.v * P.L[i].lvl);
+    return m;
+  }
   kill() { this.active = false; this.fading = false; this.gate = false; for (let li = 0; li < 4; li++) this.lay[li].done = true; }
 
   render(off, n) {
@@ -594,7 +600,7 @@ class Voice {
     }
     const mL = e.mixL, mR = e.mixR;
     if (this.fading) {
-      const g0 = this.fadeG; this.fadeG = Math.max(0, g0 - n / (0.004 * sr));
+      const g0 = this.fadeG; this.fadeG = Math.max(0, g0 - n / ((this.fadeT || 0.004) * sr));
       const dg = (this.fadeG - g0) / n; let g = g0;
       for (let i = 0; i < n; i++) { g += dg; mL[off + i] += vL[i] * g; mR[off + i] += vR[i] * g; }
       if (this.fadeG <= 0) live = false;
@@ -1306,7 +1312,7 @@ class Engine {
     if (g.vmode > 0) {
       const st = this.mono, i = st.indexOf(n); if (i >= 0) st.splice(i, 1); st.push(n);
       const vc = this.voices[0];
-      for (let k = 1; k < this.voices.length; k++) if (this.voices[k].active && !this.voices[k].fading) this.voices[k].startFade();
+      for (let k = 1; k < this.voices.length; k++) if (this.voices[k].active && !this.voices[k].fading) this.voices[k].startFade(STEAL_FADE);
       if (vc.active && vc.gate && !vc.fading && g.vmode === 2) vc.legatoTo(n);
       else vc.start(n, v, vc.active && vc.gate);
       this.monoVel = v;
@@ -1315,17 +1321,20 @@ class Engine {
     let vc = null;
     for (const x of this.voices) if (x.active && !x.fading && x.note === n) { vc = x; break; }
     if (!vc) {
-      let count = 0, free = null, oldR = null, old = null;
+      // Over the polyphony limit, the quietest released voice (else the oldest held one) fades out over STEAL_FADE.
+      // The new note takes a free slot; only if the whole pool is busy does it take the voice furthest into its fade.
+      let count = 0, free = null, quietR = null, old = null, faded = null, qLvl = 0;
       for (const x of this.voices) {
         if (!x.active) { if (!free) free = x; continue; }
-        if (x.fading) continue;
+        if (x.fading) { if (!faded || x.fadeG < faded.fadeG) faded = x; continue; }
         count++;
-        if (!x.gate && (!oldR || x.age > oldR.age)) oldR = x;
+        if (!x.gate) { const l = x.level(); if (!quietR || l < qLvl) { quietR = x; qLvl = l; } }
         if (!old || x.age > old.age) old = x;
       }
       const poly = clamp(g.poly | 0, 1, 16);
-      if (count >= poly) { const victim = oldR || old; if (victim) victim.startFade(); }
-      vc = free || oldR || old;
+      let victim = null;
+      if (count >= poly) { victim = quietR || old; if (victim) victim.startFade(STEAL_FADE); }
+      vc = free || faded || victim || quietR || old;
       if (vc && vc.active) vc.kill();
     }
     if (vc) vc.start(n, v, false);

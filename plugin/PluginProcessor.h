@@ -5,6 +5,7 @@
 #include "../src/AetherPost.h"
 #include "../src/AetherSections.h"
 #include "../src/AetherCrate.h"
+#include "SplitConvolver.h"
 
 // The factory library, shared by every instance of the plugin.
 struct Library {
@@ -85,7 +86,7 @@ private:
 
     aether::Engine engine;
     aether::PostFX post;
-    juce::dsp::Convolution conv;
+    SplitConvolver conv; bool revWasOn = false;
     aether::Assets::Bundle base, pending;
     aether::Sections secBase, secPending; aether::SectionState secLast; double secPos = 2;
     ArrFixed arrAudio, arrPending; bool arrHasPending = false;

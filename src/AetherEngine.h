@@ -18,6 +18,7 @@ constexpr double TAU = 6.283185307179586;
 constexpr double PI = 3.141592653589793;
 constexpr int CB = 32, TBL = 2048, TMASK = 2047, NLEV = 18, POOL = 20, NLD = 36, NSRC = 20, NFXD = 11;
 constexpr double VOICE_GAIN = 0.3;
+constexpr double STEAL_FADE = 0.015;   // seconds; how fast a voice taken for a new note fades out (4 ms was an audible click)
 
 inline double clampd(double x, double a, double b) { return x < a ? a : (x > b ? b : x); }
 inline double ftanh(double x) { if (x <= -3) return -1; if (x >= 3) return 1; const double x2 = x * x; return x * (27 + x2) / (27 + 9 * x2); }
@@ -491,7 +492,7 @@ inline double herm(const float* d, double p, int len) {
 
 struct Voice {
     Engine* e = nullptr;
-    bool active = false, gate = false, fading = false; double fadeG = 1;
+    bool active = false, gate = false, fading = false; double fadeG = 1, fadeT = 0.004;
     int note = 60; double vel = 0.8; long age = 0; double pitch = 60, target = 60, rand = 0, alt = 1;
     LayerVoice lay[4]; Env m0, m1; Lfo lfo[4];
     double S[NSRC] = { 0 }, M[4 * NLD] = { 0 }, gm[4] = { 0 };
@@ -500,7 +501,8 @@ struct Voice {
     void excitePluck(const Layer& L, LayerVoice& lv, double freq, double sr);
     void legatoTo(int n);
     void release() { gate = false; m0.off(); m1.off(); for (auto& lv : lay) { lv.aenv.off(); lv.fenv.off(); } }
-    void startFade() { fading = true; fadeG = 1; gate = false; }
+    void startFade(double secs = 0.004) { fading = true; fadeG = 1; fadeT = secs; gate = false; }
+    double level() const;   // current loudness estimate (envelope x layer level), for picking which voice to steal
     void kill() { active = false; fading = false; gate = false; for (auto& lv : lay) lv.done = true; }
     void render(int off, int n);
     bool renderLayer(int li, const Layer& L, LayerVoice& lv, int n);
@@ -627,6 +629,11 @@ inline void Voice::excitePluck(const Layer& L, LayerVoice& lv, double freq, doub
         for (int j = 0; j < P; j++) { const int idx = (lv.sw - P + j) & 4095; B[idx] = (float)(B[idx] + ex[j] * nm); }
     }
 }
+inline double Voice::level() const {
+    double m = 0; const Patch& P = e->patch;
+    for (int i = 0; i < 4; i++) if (!lay[i].done && P.L[i].on) m = std::max(m, lay[i].aenv.v * P.L[i].lvl);
+    return m;
+}
 inline void Voice::legatoTo(int n) { note = n; target = n; if (e->patch.g.glide <= 0.001) pitch = n; e->lastNote = n; }
 
 inline void Voice::render(int off, int n) {
@@ -668,7 +675,7 @@ inline void Voice::render(int off, int n) {
     }
     float* mL = E.mixL.data() + off; float* mR = E.mixR.data() + off;
     if (fading) {
-        const double g0 = fadeG; fadeG = std::max(0.0, g0 - n / (0.004 * sr));
+        const double g0 = fadeG; fadeG = std::max(0.0, g0 - n / (fadeT * sr));
         const double dg = (fadeG - g0) / n; double g = g0;
         for (int i = 0; i < n; i++) { g += dg; mL[i] = (float)(mL[i] + vL[i] * g); mR[i] = (float)(mR[i] + vR[i] * g); }
         if (fadeG <= 0) live = false;
@@ -1263,7 +1270,7 @@ inline void Engine::vOn(int n, double v) {
         auto it = std::find(mono.begin(), mono.end(), n); if (it != mono.end()) mono.erase(it);
         if (mono.size() < 128) mono.push_back(n);
         Voice& vc = voices[0];
-        for (int k = 1; k < POOL; k++) if (voices[k].active && !voices[k].fading) voices[k].startFade();
+        for (int k = 1; k < POOL; k++) if (voices[k].active && !voices[k].fading) voices[k].startFade(STEAL_FADE);
         if (vc.active && vc.gate && !vc.fading && g.vmode == 2) vc.legatoTo(n);
         else vc.start(n, v, vc.active && vc.gate);
         monoVel = v;
@@ -1272,17 +1279,20 @@ inline void Engine::vOn(int n, double v) {
     Voice* vc = nullptr;
     for (auto& x : voices) if (x.active && !x.fading && x.note == n) { vc = &x; break; }
     if (!vc) {
-        int count = 0; Voice* free = nullptr; Voice* oldR = nullptr; Voice* old = nullptr;
+        // Over the polyphony limit, the quietest released voice (else the oldest held one) fades out over STEAL_FADE.
+        // The new note takes a free slot; only if the whole pool is busy does it take the voice furthest into its fade.
+        int count = 0; Voice* free = nullptr; Voice* quietR = nullptr; Voice* old = nullptr; Voice* faded = nullptr; double qLvl = 0;
         for (auto& x : voices) {
             if (!x.active) { if (!free) free = &x; continue; }
-            if (x.fading) continue;
+            if (x.fading) { if (!faded || x.fadeG < faded->fadeG) faded = &x; continue; }
             count++;
-            if (!x.gate && (!oldR || x.age > oldR->age)) oldR = &x;
+            if (!x.gate) { const double l = x.level(); if (!quietR || l < qLvl) { quietR = &x; qLvl = l; } }
             if (!old || x.age > old->age) old = &x;
         }
         const int poly = std::max(1, std::min(16, g.poly));
-        if (count >= poly) { Voice* victim = oldR ? oldR : old; if (victim) victim->startFade(); }
-        vc = free ? free : (oldR ? oldR : old);
+        Voice* victim = nullptr;
+        if (count >= poly) { victim = quietR ? quietR : old; if (victim) victim->startFade(STEAL_FADE); }
+        vc = free ? free : (faded ? faded : victim ? victim : (quietR ? quietR : old));
         if (vc && vc->active) vc->kill();
     }
     if (vc) vc->start(n, v, false);

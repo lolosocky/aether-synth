@@ -56,14 +56,14 @@ int main(int argc, char** argv) {
     const size_t first = argc > 2 ? (size_t)std::atoi(argv[2]) : 0, count = argc > 3 ? (size_t)std::atoi(argv[3]) : presets.size();
     const int B = argc > 4 ? std::atoi(argv[4]) : 256; const double SR = 48000;
     const auto ev = score();
-    std::cout << std::fixed << std::setprecision(4);
+    std::cout << std::fixed << std::setprecision(4) << std::unitbuf;
     for (size_t idx = first; idx < std::min(presets.size(), first + count); idx++) {
         Assets::Bundle b; b.p = patchFromJson(presets[idx]); Assets::get().fill(b);
         auto e = std::make_unique<Engine>(SR); e->setBundle(b, true); e->rng.seed(1000.0 + (double)idx);
         PostFX post; post.prepare(SR);
         const int N = (int)(ev.back().t * SR);
         std::vector<float> L((size_t)B), R((size_t)B), sL((size_t)B), sR((size_t)B);
-        size_t ei = 0; int steals = 0, glitches = 0, maxVoices = 0; double worst = 0, total = 0, quietFrom = 0;
+        std::vector<double> blocks; size_t ei = 0; int steals = 0, fades = 0, glitches = 0, maxVoices = 0; double worst = 0, total = 0, quietFrom = 0;
         double prev[2][2] = { { 0, 0 }, { 0, 0 } }, d2rms = 1e-6; int lastOn = -100000;
         for (int off = 0; off < N; off += B) {
             const int n = std::min(B, N - off);
@@ -72,13 +72,14 @@ int main(int argc, char** argv) {
             while (ei < ev.size() && ev[ei].note >= 0 && ev[ei].t * SR < off + n) {
                 const int at = std::max(done, (int)(ev[ei].t * SR) - off);
                 if (at > done) { e->process(L.data() + done, R.data() + done, at - done); done = at; }
-                double before[POOL]; int notes[POOL];
-                for (int v = 0; v < POOL; v++) { before[v] = e->voices[v].active ? voiceLevel(e->voices[v], e->patch) : 0; notes[v] = e->voices[v].note; }
+                double before[POOL]; int notes[POOL]; bool wasFading[POOL];
+                for (int v = 0; v < POOL; v++) { before[v] = e->voices[v].active ? voiceLevel(e->voices[v], e->patch) : 0; notes[v] = e->voices[v].note; wasFading[v] = e->voices[v].fading; }
                 if (ev[ei].on) { e->noteIn(ev[ei].note, 0.8); lastOn = off + at; } else e->noteOut(ev[ei].note);
                 for (int v = 0; v < POOL; v++) {
                     const Voice& x = e->voices[v];
                     const bool cut = before[v] > 0.02 && (!x.active || (x.age == 0 && x.note != notes[v]));
                     if (cut && e->patch.g.vmode == 0) steals++;
+                    else if (before[v] > 0.05 && !wasFading[v] && x.fading && e->patch.g.vmode == 0) fades++;
                 }
                 ei++;
             }
@@ -86,7 +87,12 @@ int main(int argc, char** argv) {
             post.stage1(e->patch, e->fxm, e->bpm, L.data(), R.data(), sL.data(), sR.data(), n);
             post.stage2(e->patch, e->fxm, 0.8, L.data(), R.data(), sL.data(), sR.data(), n);
             const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-            total += dt; worst = std::max(worst, dt / (n / SR));
+            if (const char* dump = std::getenv("AETHER_DUMP")) {   // raw float32 stereo, for listening or analysis
+                static FILE* f = nullptr; static size_t which = (size_t)-1;
+                if (which != idx) { if (f) std::fclose(f); f = std::fopen((std::string(dump) + "_" + std::to_string(idx) + ".f32").c_str(), "wb"); which = idx; }
+                for (int i = 0; i < n; i++) { const float fr[2] = { L[(size_t)i], R[(size_t)i] }; std::fwrite(fr, 4, 2, f); }
+            }
+            total += dt; worst = std::max(worst, dt / (n / SR)); blocks.push_back(dt / (n / SR));
             maxVoices = std::max(maxVoices, e->activeVoices());
             // crackle detector: second difference far above its recent level, away from note starts
             for (int i = 0; i < n; i++) {
@@ -100,8 +106,9 @@ int main(int argc, char** argv) {
             }
         }
         const double rt = total / (N / SR);
-        std::cout << idx << "\t" << presets[idx]["cat"].get<std::string>() << "\t" << presets[idx]["name"].get<std::string>() << "\tavg " << rt << "\tworst " << worst
-                  << "\tvoices " << maxVoices << "\tsteals " << steals << "\tglitches " << glitches << "\n";
+        std::sort(blocks.begin(), blocks.end()); const double p99 = blocks[(size_t)(blocks.size() * 0.99)];
+        std::cout << idx << "\t" << presets[idx]["cat"].get<std::string>() << "\t" << presets[idx]["name"].get<std::string>() << "\tavg " << rt << "\tp99 " << p99 << "\tworst " << worst
+                  << "\tvoices " << maxVoices << "\tsteals " << steals << "\tfadecuts " << fades << "\tglitches " << glitches << "\n";
     }
     return 0;
 }

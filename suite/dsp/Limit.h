@@ -50,8 +50,9 @@ public:
         const double relSlow = 1 - std::exp(-1.0 / (std::max(1.0, p.releaseMs) * 6 * 0.001 * sr));
         const int Q = W + 4, hist = 2 * kTaps;
         double deepest = 1;
+        const double inTarget = dbToGain(p.inputDb);   // constant for the block: computed once, not per sample
         for (int i = 0; i < n; i++) {
-            const double gin = inS.next(dbToGain(p.inputDb));
+            const double gin = inS.next(inTarget);
             double x[2] = { ch[0][i] * gin, (nch > 1 ? ch[1][i] : ch[0][i]) * gin };
             // detection on the newest sample and the interpolated points just before the sample kTaps back
             for (int c = 0; c < 2; c++) xin[(size_t)c][(size_t)hpos] = xin[(size_t)c][(size_t)(hpos + hist)] = x[c];

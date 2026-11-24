@@ -33,10 +33,12 @@ public:
         olaScale = (double)H / s2;   // Hann analysis x Hann synthesis at hop N/4
         for (int c = 0; c < 2; c++) {
             inF[c].assign((size_t)N, 0.0); outF[c].assign((size_t)H, 0.0); acc[c].assign((size_t)N * 2, 0.0);
-            X[c].assign((size_t)N, {}); Y[c].assign((size_t)N, {}); synPhase[c].assign((size_t)NB, 0.0);
+            X[c].assign((size_t)N, {}); Y[c].assign((size_t)N, {}); if (c == 0) Z2.assign((size_t)N, {});
+
             dry[c].assign((size_t)latency(), 0.0f);
         }
-        lastMidPhase.assign((size_t)NB, 0.0); sLog.assign((size_t)NB, 0.0); mag.assign((size_t)NB, 0.0); trueBin.assign((size_t)NB, 0.0);
+        midNow.assign((size_t)NB, {}); midPrev.assign((size_t)NB, {});
+        for (int c = 0; c < 2; c++) { synY[c].assign((size_t)NB, {}); synPh[c].assign((size_t)NB, 0.0); synPending[c].assign((size_t)NB, 0); } sLog.assign((size_t)NB, 0.0); mag.assign((size_t)NB, 0.0); trueBin.assign((size_t)NB, 0.0);
         wellW.assign((size_t)NB, 1.0); regionTarget.assign((size_t)NB, 0.0);
         rover = N - H; dpos = 0; lastKey = -1; lastScale = -1; massGain = 1;
         mixS.setTime(sr, 0.02); mixS.reset(p.mix);
@@ -79,12 +81,18 @@ public:
         const int mask = scales()[(size_t)clampv(scale, 0, (int)scales().size() - 1)].mask;
         const double midi = 69 + 12 * std::log2(std::max(f, 1.0) / 440.0);
         double best = f, bd = 1e9;
-        for (int m = (int)std::floor(midi) - 12; m <= (int)std::ceil(midi) + 12; m++) {
-            if (!((mask >> (((m - key) % 12 + 12) % 12)) & 1)) continue;
+        const int m0 = (int)std::floor(midi) - 12, m1 = (int)std::ceil(midi) + 12;
+        for (int m = m0, pc = ((m0 - key) % 12 + 12) % 12; m <= m1; m++, pc = pc == 11 ? 0 : pc + 1) {   // pc: pitch class above the key
+            if (!((mask >> pc) & 1)) continue;
             const double d = std::abs(m - midi);
-            if (d < bd) { bd = d; best = 440.0 * std::pow(2.0, (m - 69) / 12.0); }
+            if (d < bd) { bd = d; best = noteHz(m); }
         }
         return best;
+    }
+    // 440 * 2^((m - 69) / 12), from a table for the usual range (same values, no pow per call)
+    static double noteHz(int m) {
+        static const std::array<double, 256> t = [] { std::array<double, 256> a{}; for (int i = 0; i < 256; i++) a[(size_t)i] = 440.0 * std::pow(2.0, (i - 128 - 69) / 12.0); return a; }();
+        return m >= -128 && m < 128 ? t[(size_t)(m + 128)] : 440.0 * std::pow(2.0, (m - 69) / 12.0);
     }
 
 private:
@@ -102,25 +110,36 @@ private:
         const int kFloor = std::max(2, (int)std::ceil(p.floorHz * N / sr));
         const double expected = 2 * kPi * H / N;
         // analysis
-        for (int c = 0; c < 2; c++) {
-            for (int i = 0; i < N; i++) X[c][(size_t)i] = { inF[c][(size_t)i] * win[(size_t)i], 0.0 };
-            fft.transform(X[c].data(), false);
+        // both channels in one complex FFT (left in the real part, right in the imaginary), then separated:
+        // X_L[k] = (Z[k] + conj Z[N-k]) / 2,  X_R[k] = (Z[k] - conj Z[N-k]) / 2i
+        {
+            auto& Z = Y[0];
+            for (int i = 0; i < N; i++) Z[(size_t)i] = { inF[0][(size_t)i] * win[(size_t)i], inF[1][(size_t)i] * win[(size_t)i] };
+            fft.transform(Z.data(), false);
+            for (int k = 0; k < NB; k++) {
+                const auto a = Z[(size_t)k], b = std::conj(Z[(size_t)((N - k) & (N - 1))]);
+                X[0][(size_t)k] = { 0.5 * (a.real() + b.real()), 0.5 * (a.imag() + b.imag()) };
+                X[1][(size_t)k] = { 0.5 * (a.imag() - b.imag()), -0.5 * (a.real() - b.real()) };
+            }
         }
         double maxM = 0;
         for (int k = 0; k < NB; k++) {
             const auto mid = X[0][(size_t)k] + X[1][(size_t)k];
-            mag[(size_t)k] = std::abs(mid); maxM = std::max(maxM, mag[(size_t)k]);
-            const double ph = std::arg(mid);
-            double d = ph - lastMidPhase[(size_t)k] - k * expected;
-            d -= 2 * kPi * std::round(d / (2 * kPi));
-            lastMidPhase[(size_t)k] = ph;
-            trueBin[(size_t)k] = k + d * N / (2 * kPi * H);
+            midNow[(size_t)k] = mid;
+            mag[(size_t)k] = std::sqrt(mid.real() * mid.real() + mid.imag() * mid.imag()); maxM = std::max(maxM, mag[(size_t)k]);
         }
+        // true frequency from the phase advance since the last frame; only peaks need it, so only peaks pay the atan2s
+        auto trueBinAt = [&](int k) {
+            double d = std::arg(midNow[(size_t)k]) - std::arg(midPrev[(size_t)k]) - k * expected;
+            d -= 2 * kPi * std::round(d / (2 * kPi));
+            return k + d * N / (2 * kPi * H);
+        };
         // peaks above the floor
         peakList.clear();
         const double gate = std::max(maxM * std::pow(10.0, -70.0 / 20), 1e-7 * N);
         for (int k = std::max(kFloor, 2); k < NB - 2; k++)
-            if (mag[(size_t)k] > gate && mag[(size_t)k] > mag[(size_t)k - 1] && mag[(size_t)k] >= mag[(size_t)k + 1]) peakList.push_back(k);
+            if (mag[(size_t)k] > gate && mag[(size_t)k] > mag[(size_t)k - 1] && mag[(size_t)k] >= mag[(size_t)k + 1]) { peakList.push_back(k); trueBin[(size_t)k] = trueBinAt(k); }
+        std::swap(midNow, midPrev);
         // regions: from the minimum before each peak to the minimum after it
         regionStart.assign(peakList.size(), kFloor); regionEnd.assign(peakList.size(), NB - 1);
         for (size_t i = 0; i + 1 < peakList.size(); i++) {
@@ -148,17 +167,31 @@ private:
                 const double r = std::exp(s), newBin = trueBin[(size_t)pk] * r;
                 const int dst = (int)std::lround(newBin), shift = dst - pk;
                 if (dst < 1 || dst >= NB - 1) continue;
-                const double theta = synPhase[c][(size_t)dst] + newBin * expected;
+                const double theta = synPhaseAt(c, dst) + newBin * expected;
                 const double peakPh = std::arg(Xc[(size_t)pk]);
+                // every bin in the region turns by the same angle (keeps its phase relative to the peak), so one
+                // rotation per region replaces abs + arg + polar on every bin
+                const double rc = std::cos(theta - peakPh), rs = std::sin(theta - peakPh);
                 for (int k = regionStart[i]; k <= regionEnd[i]; k++) {
                     const int k2 = k + shift; if (k2 < kFloor || k2 >= NB) continue;
-                    Yc[(size_t)k2] += std::polar(std::abs(Xc[(size_t)k]), theta + std::arg(Xc[(size_t)k]) - peakPh);
+                    const auto x = Xc[(size_t)k];
+                    Yc[(size_t)k2] += std::complex<double>(x.real() * rc - x.imag() * rs, x.real() * rs + x.imag() * rc);
                 }
             }
             // bins not covered by any region (above the floor but below the first peak, etc.) pass through
             if (peakList.empty()) for (int k = kFloor; k < NB; k++) Yc[(size_t)k] = Xc[(size_t)k];
             else { for (int k = kFloor; k < regionStart[0]; k++) Yc[(size_t)k] += Xc[(size_t)k]; }
-            for (int k = 0; k < NB; k++) synPhase[c][(size_t)k] = std::abs(Yc[(size_t)k]) > 0 ? std::arg(Yc[(size_t)k]) : synPhase[c][(size_t)k] + k * expected;
+            // each bin's output phase for the next frame: arg(Y) where the bin has output, otherwise the old phase
+            // advanced by one hop. The arg is only worked out when it is needed (a later read, or the bin going
+            // silent), which gives exactly the same numbers with far fewer atan2 calls.
+            for (int k = 0; k < NB; k++) {
+                const auto y = Yc[(size_t)k];
+                if (y.real() != 0 || y.imag() != 0) { synY[c][(size_t)k] = y; synPending[c][(size_t)k] = 1; }
+                else {
+                    if (synPending[c][(size_t)k]) { synPh[c][(size_t)k] = std::arg(synY[c][(size_t)k]); synPending[c][(size_t)k] = 0; }
+                    synPh[c][(size_t)k] = synPh[c][(size_t)k] + k * expected;
+                }
+            }
         }
         // mass: gather energy into the wells, keeping the overall level
         if (p.mass > 0.001) {
@@ -180,12 +213,21 @@ private:
             const double cap = ein * 1.41;
             if (eout > cap && eout > 1e-20) { const double g = std::sqrt(cap / eout); for (int c = 0; c < nch; c++) for (int k = kFloor; k < NB; k++) Y[c][(size_t)k] *= g; }
         }
-        // inverse, window, overlap-add
+        // inverse, window, overlap-add: both channels in one inverse FFT, W = Y_L + i Y_R (each conjugate-symmetric),
+        // so the left output comes back in the real part and the right in the imaginary part
+        for (int c = 0; c < 2; c++) { Y[c][0] = { Y[c][0].real(), 0 }; Y[c][(size_t)N / 2] = { Y[c][(size_t)N / 2].real(), 0 }; }
+        {
+            auto& W = Z2;
+            for (int k = 0; k < NB; k++) {
+                const auto l = Y[0][(size_t)k], r = Y[1][(size_t)k];
+                W[(size_t)k] = { l.real() - r.imag(), l.imag() + r.real() };
+                if (k > 0 && k < N / 2) W[(size_t)(N - k)] = { l.real() + r.imag(), -l.imag() + r.real() };
+            }
+            fft.transform(W.data(), true);
+            for (int i = 0; i < N; i++) { Y[0][(size_t)i] = { W[(size_t)i].real(), 0 }; Y[1][(size_t)i] = { W[(size_t)i].imag(), 0 }; }
+        }
         for (int c = 0; c < nch; c++) {
             auto& Yc = Y[c];
-            for (int k = 1; k < N / 2; k++) Yc[(size_t)(N - k)] = std::conj(Yc[(size_t)k]);
-            Yc[0] = { Yc[0].real(), 0 }; Yc[(size_t)N / 2] = { Yc[(size_t)N / 2].real(), 0 };
-            fft.transform(Yc.data(), true);
             for (int i = 0; i < N; i++) acc[c][(size_t)i] += Yc[(size_t)i].real() * win[(size_t)i] * olaScale;
             for (int i = 0; i < H; i++) outF[c][(size_t)i] = acc[c][(size_t)i];
             std::copy(acc[c].begin() + H, acc[c].begin() + H + N, acc[c].begin());
@@ -204,10 +246,12 @@ private:
 
     GravityParams p; double sr = 48000; int order = 11, N = 2048, H = 512, NB = 1025, rover = 1536, dpos = 0, lastKey = -1, lastScale = -1;
     Fft fft{ 11 }; std::vector<double> win; double olaScale = 1, massGain = 1;
-    std::vector<double> inF[2], outF[2], acc[2], synPhase[2];
-    std::vector<std::complex<double>> X[2], Y[2];
+    std::vector<double> inF[2], outF[2], acc[2];
+    std::vector<std::complex<double>> X[2], Y[2], Z2;
     std::vector<float> dry[2];
-    std::vector<double> lastMidPhase, sLog, mag, trueBin, wellW, regionTarget;
+    std::vector<std::complex<double>> midNow, midPrev, synY[2]; std::vector<double> synPh[2]; std::vector<uint8_t> synPending[2];
+    double synPhaseAt(int c, int k) const { return synPending[c][(size_t)k] ? std::arg(synY[c][(size_t)k]) : synPh[c][(size_t)k]; }
+    std::vector<double> sLog, mag, trueBin, wellW, regionTarget;
     std::vector<int> peakList, regionStart, regionEnd;
     std::array<PeakView, kMaxView> view{}; std::atomic<int> viewCount{ 0 };
     Smooth mixS;

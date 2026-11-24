@@ -29,7 +29,8 @@ const juce::Colour aether{ 0xffff5b1a },    // mission orange
     verb{ 0xff2d66f5 },                     // blue
     delay{ 0xff1fae55 },                    // green
     limit{ 0xff7b55f5 },                    // violet
-    gravity{ 0xff121417 };                  // void
+    gravity{ 0xff121417 },                  // void
+    duck{ 0xff0fb5a5 };                     // teal
 }
 
 // ---------------------------------------------------------------- type

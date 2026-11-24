@@ -7,6 +7,7 @@
 #include "Delay.h"
 #include "Limit.h"
 #include "Gravity.h"
+#include "Duck.h"
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -324,8 +325,53 @@ static void testGravity() {
     }
 }
 
+static void testDuck() {
+    std::printf("Duck\n");
+    const double sr = 48000, bpm = 120; const int B = 256, N = (int)(sr * 4);   // 4 s = 8 beats at 120
+    const int beat = (int)(sr * 60 / bpm);
+    auto runTempo = [&](double amount, double rate, bool playing, int len) {
+        DuckDsp d; d.prepare(sr); d.amount = amount; d.release = 0.5; d.rateBeats = rate;
+        std::vector<float> L((size_t)len, 1.0f);
+        for (int o = 0; o < len; o += B) { float* ch[1] = { &L[(size_t)o] }; d.process(ch, 1, std::min(B, len - o), playing ? o * bpm / 60 / sr : 0, bpm, playing, nullptr, 0); }
+        return L;
+    };
+    {
+        auto L = runTempo(1.0, 1.0, true, N);
+        double minv = 1, maxStep = 0;
+        for (int i = 1; i < N; ++i) { minv = std::min(minv, (double)L[(size_t)i]); maxStep = std::max(maxStep, (double)std::abs(L[(size_t)i] - L[(size_t)i - 1])); }
+        expect(L[(size_t)(2 * beat + (int)(0.003 * sr))] < 0.05, "tempo: volume is down right after the beat");
+        expect(L[(size_t)(2 * beat + (int)(0.9 * beat))] > 0.99, "tempo: volume is back up before the next beat");
+        expect(minv >= 0 && minv < 0.02, "tempo: dips all the way at 100% and never goes negative");
+        expect(maxStep < 0.03, "tempo: no clicks (largest per-sample gain step " + std::to_string(maxStep) + ")");
+        auto H = runTempo(0.5, 1.0, true, B * 40); double hmin = 1; for (float v : H) hmin = std::min(hmin, (double)v);
+        expect(std::abs(hmin - 0.5) < 0.03, "tempo: 50% amount dips to half volume");
+        auto E = runTempo(1.0, 0.5, true, N);
+        expect(E[(size_t)(beat + beat / 2 + (int)(0.003 * sr))] < 0.05, "tempo: 1/8 rate also dips on the off-beat");
+        auto S = runTempo(0.75, 1.0, false, B * 20); double smin = 1; for (float v : S) smin = std::min(smin, (double)v);
+        expect(smin > 0.999, "tempo: does nothing while the song is stopped");
+    }
+    {   // kick mode: kicks at 0.5 s, 1.5 s, 2.25 s; the reported hits and gains match what happened to the audio
+        std::vector<float> sc((size_t)N, 0.0f);
+        for (double t : { 0.5, 1.5, 2.25 }) for (int i = 0; i < (int)(0.12 * sr); ++i) sc[(size_t)((int)(t * sr) + i)] = (float)(0.8 * std::exp(-i / (0.03 * sr)) * std::sin(2 * M_PI * 55 * i / sr));
+        for (float level : { 1.0f, 0.02f }) {
+            DuckDsp k; k.prepare(sr); k.mode = 1; k.amount = 1; k.release = 0.4;
+            std::vector<float> K((size_t)N, 1.0f), gains((size_t)N); std::vector<uint8_t> hits((size_t)N);
+            std::vector<float> s2v((size_t)N); for (int i = 0; i < N; i++) s2v[(size_t)i] = sc[(size_t)i] * level;
+            for (int o = 0; o < N; o += B) { float* ch[1] = { &K[(size_t)o] }; const float* s2[1] = { &s2v[(size_t)o] }; k.process(ch, 1, B, 0, bpm, true, s2, 1, &gains[(size_t)o], &hits[(size_t)o]); }
+            int nh = 0; for (auto h : hits) nh += h;
+            double gd = 0; for (int i = 0; i < N; i++) gd = std::max(gd, (double)std::abs(gains[(size_t)i] - K[(size_t)i]));
+            const std::string tag = level < 1 ? " (quiet kick, -34 dB)" : "";
+            expect(K[(size_t)(0.25 * sr)] > 0.999, "kick: untouched before the first kick" + tag);
+            expect(K[(size_t)(0.505 * sr)] < 0.1 && K[(size_t)(1.505 * sr)] < 0.1 && K[(size_t)(2.255 * sr)] < 0.1, "kick: dips on every kick" + tag);
+            expect(K[(size_t)(1.2 * sr)] > 0.99, "kick: recovers between kicks" + tag);
+            expect(nh == 3, "kick: detects exactly 3 hits, no double triggers (" + std::to_string(nh) + ")" + tag);
+            expect(gd < 1e-6, "kick: reported gain matches the audio exactly" + tag);
+        }
+    }
+}
+
 int main() {
-    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity();
+    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck();
     std::printf(fails ? "FAILED (%d)\n" : "ALL PASS\n", fails);
     return fails ? 1 : 0;
 }

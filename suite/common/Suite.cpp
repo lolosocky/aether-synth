@@ -5,8 +5,9 @@ using namespace station;
 
 // ================================================================ processor
 Processor::Processor(const juce::String& stateName, juce::AudioProcessorValueTreeState::ParameterLayout layout)
-    : AudioProcessor(BusesProperties().withInput("Input", juce::AudioChannelSet::stereo(), true).withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts(*this, nullptr, stateName, std::move(layout)) {
+    : Processor(BusesProperties().withInput("Input", juce::AudioChannelSet::stereo(), true).withOutput("Output", juce::AudioChannelSet::stereo(), true), stateName, std::move(layout)) {}
+Processor::Processor(const BusesProperties& buses, const juce::String& stateName, juce::AudioProcessorValueTreeState::ParameterLayout layout)
+    : AudioProcessor(buses), apvts(*this, nullptr, stateName, std::move(layout)) {
     for (auto* prm : getParameters())
         if (auto* r = dynamic_cast<juce::RangedAudioParameter*>(prm)) params[r->getParameterID()] = apvts.getRawParameterValue(r->getParameterID());
 }

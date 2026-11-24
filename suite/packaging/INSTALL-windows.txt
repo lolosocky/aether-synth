@@ -1,6 +1,7 @@
 LGN MIXING SUITE FOR WINDOWS (VST3)
 
-EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter and Gravity.
+EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity and Duck.
+Duck replaces the older LGN Duck download: same plugin, so your saved projects keep their settings.
 
 1. Copy every .vst3 folder to  C:\Program Files\Common Files\VST3\
 2. In FL Studio: Options > Manage plugins > Find more plugins.

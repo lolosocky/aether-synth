@@ -1,6 +1,7 @@
 LGN MIXING SUITE FOR MAC (VST3 + AU)
 
-EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter and Gravity.
+EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity and Duck.
+Duck replaces the older LGN Duck download: same plugin, so your saved projects keep their settings.
 
 1. Double-click install-mac.command. If macOS blocks it, right-click it > Open > Open.
    (Or copy the .vst3 files to /Library/Audio/Plug-Ins/VST3/ and the .component files to

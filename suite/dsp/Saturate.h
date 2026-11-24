@@ -19,10 +19,11 @@ public:
         switch (mode) {
             case tape: return std::tanh(x);
             case tube: {   // biased so positive and negative halves bend differently, then re-centred
-                const double b = 0.35, y = std::tanh(x + b) - std::tanh(b);
-                return y / (1 - std::tanh(b) * std::tanh(b));
+                static const double b = 0.35, tb = std::tanh(b), norm = 1 - tb * tb;   // constants, computed once
+                const double y = std::tanh(x + b) - tb;
+                return y / norm;
             }
-            case transistor: { const double p = 6.0; return x / std::pow(1 + std::pow(std::abs(x), p), 1 / p); }
+            case transistor: { const double x2 = x * x; return x / std::pow(1 + x2 * x2 * x2, 1.0 / 6.0); }   // x / (1 + |x|^6)^(1/6)
             default: { const double a = x + 0.45 * std::abs(x); return std::tanh(2.0 * a) * 0.8; }
         }
     }

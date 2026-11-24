@@ -41,21 +41,39 @@ bool finiteAndSane(const juce::AudioBuffer<float>& b, int n, float limit, float&
     return peak < limit;
 }
 
+// A kick on every beat at 120 BPM, written to channels from `first` on (a sidechain bus, when there is one).
+struct KickTrack {
+    double sr = 48000; long long t = 0;
+    void fill(juce::AudioBuffer<float>& b, int first, int n) {
+        for (int i = 0; i < n; i++, t++) {
+            const double ph = std::fmod((double)t / sr, 0.5);
+            const double v = 0.8 * std::exp(-ph * 18) * std::sin(juce::MathConstants<double>::twoPi * (45 + 120 * std::exp(-ph * 40)) * ph);
+            for (int c = first; c < b.getNumChannels(); c++) b.setSample(c, i, (float)v);
+        }
+    }
+};
+// A transport that plays at 120 BPM.
+struct TestHead : juce::AudioPlayHead {
+    double ppq = 0; bool playing = true;
+    juce::Optional<PositionInfo> getPosition() const override { PositionInfo i; i.setBpm(120.0); i.setIsPlaying(playing); i.setPpqPosition(ppq); return i; }
+};
+
 double run(juce::AudioProcessor& p, double sr, int chans, std::function<int()> blockSize, double seconds, bool fuzz, float& peak) {
-    juce::AudioProcessor::BusesLayout lay;
-    lay.inputBuses.add(chans == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
-    lay.outputBuses.add(chans == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
+    auto lay = p.getBusesLayout();
+    lay.inputBuses.getReference(0) = lay.outputBuses.getReference(0) = chans == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo();
     check(p.setBusesLayout(lay), "layout " + juce::String(chans) + " ch");
     p.prepareToPlay(sr, 1024);
-    Signal sig; sig.sr = sr; juce::Random rng{ 3 };
-    juce::AudioBuffer<float> buf(chans, 1024); juce::MidiBuffer midi;
+    Signal sig; sig.sr = sr; juce::Random rng{ 3 }; KickTrack kick; kick.sr = sr;
+    const int bufCh = juce::jmax(p.getTotalNumInputChannels(), p.getTotalNumOutputChannels());   // includes any sidechain
+    juce::AudioBuffer<float> buf(bufCh, 1024); juce::MidiBuffer midi;
     const long long N = (long long)(seconds * sr); long long done = 0; double busy = 0;
     auto& params = p.getParameters();
     while (done < N) {
         const int n = (int)std::min<long long>(blockSize(), N - done);
         if (fuzz) for (auto* prm : params) if (rng.nextFloat() < 0.15f) prm->setValueNotifyingHost(rng.nextFloat());
         sig.fill(buf, n);
-        juce::AudioBuffer<float> view(buf.getArrayOfWritePointers(), chans, n);
+        if (bufCh > chans) kick.fill(buf, chans, n);
+        juce::AudioBuffer<float> view(buf.getArrayOfWritePointers(), bufCh, n);
         const auto t0 = std::chrono::steady_clock::now();
         p.processBlock(view, midi);
         busy += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -70,10 +88,50 @@ double run(juce::AudioProcessor& p, double sr, int chans, std::function<int()> b
 
 void setAll(juce::AudioProcessor& p, float v) { for (auto* prm : p.getParameters()) prm->setValueNotifyingHost(v); }
 void setDefaults(juce::AudioProcessor& p) { for (auto* prm : p.getParameters()) prm->setValueNotifyingHost(prm->getDefaultValue()); }
+
+// Benchmark: every preset, 6 s each at 48 kHz / 512, with a running transport and a kick on any sidechain.
+// Prints CPU per preset (best of 3 runs) and writes the exact output to `outFile` so builds can be compared.
+int bench(const juce::String& outFile) {
+    std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
+    auto* lp = dynamic_cast<lgn::Processor*>(p.get());
+    const double sr = 48000; const int B = 512, blocks = (int)(6 * sr / B);
+    juce::File f(juce::File::getCurrentWorkingDirectory().getChildFile(outFile)); f.deleteFile();
+    juce::FileOutputStream os(f);
+    double total = 0, worst = 0; juce::String worstName;
+    const int np = lp ? lp->getNumPrograms() : 1;
+    for (int i = 0; i < np; i++) {
+        double best = 1e9;
+        for (int rep = 0; rep < 3; rep++) {
+            if (lp) lp->setCurrentProgram(i);
+            p->setRateAndBufferSizeDetails(sr, B);
+            TestHead head; p->setPlayHead(&head);
+            p->prepareToPlay(sr, B);
+            Signal sig; KickTrack kick; juce::AudioBuffer<float> buf(juce::jmax(2, p->getTotalNumInputChannels()), B); juce::MidiBuffer midi;
+            double busy = 0;
+            for (int k = 0; k < blocks; k++) {
+                sig.fill(buf, B); if (buf.getNumChannels() > 2) kick.fill(buf, 2, B);
+                const auto t0 = std::chrono::steady_clock::now();
+                p->processBlock(buf, midi);
+                busy += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+                head.ppq += B * 2.0 / sr;
+                if (rep == 0) for (int n = 0; n < B; n++) for (int c = 0; c < 2; c++) os.writeFloat(buf.getSample(c, n));
+            }
+            p->releaseResources(); p->setPlayHead(nullptr);
+            best = std::min(best, busy / (blocks * B / sr));
+        }
+        total += best;
+        const juce::String nm = lp ? (lp->presets()[(size_t)i].category + " / " + lp->getProgramName(i)) : juce::String("default");
+        if (best > worst) { worst = best; worstName = nm; }
+        std::cout << "    " << nm.paddedRight(' ', 40) << juce::String(best * 100, 2).paddedLeft(' ', 6) << " %\n";
+    }
+    std::cout << "  " << p->getName() << ": average " << juce::String(total / np * 100, 2) << " %, worst " << juce::String(worst * 100, 2) << " % (" << worstName << ")\n";
+    return 0;
+}
 }
 
 int main(int argc, char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
+    if (argc > 2 && juce::String(argv[1]) == "--bench") return bench(argv[2]);
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     const juce::String name = p->getName();
     std::cout << name << ": " << p->getParameters().size() << " parameters\n";
@@ -124,12 +182,14 @@ int main(int argc, char** argv) {
             // loudness change: RMS out vs in over 3 s of the test signal (after a 1 s settle)
             double si = 0, so = 0;
             {
-                lp->prepareToPlay(48000, 512); Signal sg; juce::AudioBuffer<float> b(2, 512); juce::MidiBuffer m;
+                lp->prepareToPlay(48000, 512); Signal sg; KickTrack kt; TestHead head; lp->setPlayHead(&head);
+                juce::AudioBuffer<float> b(juce::jmax(2, lp->getTotalNumInputChannels()), 512); juce::MidiBuffer m;
                 for (int k = 0; k < 375; k++) {
-                    sg.fill(b, 512); const double ei = b.getRMSLevel(0, 0, 512); lp->processBlock(b, m); const double eo = b.getRMSLevel(0, 0, 512);
+                    sg.fill(b, 512); if (b.getNumChannels() > 2) kt.fill(b, 2, 512); head.ppq += 512 * 2.0 / 48000;
+                    const double ei = b.getRMSLevel(0, 0, 512); lp->processBlock(b, m); const double eo = b.getRMSLevel(0, 0, 512);
                     if (k >= 94) { si += ei * ei; so += eo * eo; }
                 }
-                lp->releaseResources();
+                lp->releaseResources(); lp->setPlayHead(nullptr);
             }
             const double db = juce::Decibels::gainToDecibels(pk, -200.0f), gain = 10 * std::log10((so + 1e-20) / (si + 1e-20));
             std::cout << "    " << juce::String(i).paddedLeft(' ', 2) << "  " << (lp->presets()[(size_t)i].category + " / " + lp->getProgramName(i)).paddedRight(' ', 38) << " peak " << juce::String(db, 1) << " dBFS  loudness " << (gain >= 0 ? "+" : "") << juce::String(gain, 1) << " dB\n";
@@ -141,43 +201,54 @@ int main(int argc, char** argv) {
         lp->setCurrentProgram(0);
     }
 
-    // editor: render while audio plays so meters and displays show something real
+    // editor: render while audio plays (with a running transport) so meters and displays show something real
     {
         const juce::File dir(juce::File::getCurrentWorkingDirectory().getChildFile(argc > 1 ? argv[1] : "snapshots"));
         dir.createDirectory();
-        juce::AudioProcessor::BusesLayout lay; lay.inputBuses.add(juce::AudioChannelSet::stereo()); lay.outputBuses.add(juce::AudioChannelSet::stereo());
+        auto lay = p->getBusesLayout();
+        lay.inputBuses.getReference(0) = lay.outputBuses.getReference(0) = juce::AudioChannelSet::stereo();
         p->setBusesLayout(lay);
-        p->prepareToPlay(48000, 512);
-        // a few settings per plugin so the snapshot shows the plugin doing something
-        static const std::map<juce::String, std::vector<std::pair<const char*, float>>> demo = {
-            { "LGN EQ", { { "lc_on", 1 }, { "lc_freq", 35 }, { "ls_gain", 3 }, { "ls_freq", 90 }, { "b1_gain", -4.5f }, { "b1_freq", 320 }, { "b1_q", 1.6f },
-                          { "b2_gain", 2.5f }, { "b2_freq", 2400 }, { "b3_gain", -3 }, { "b3_freq", 5200 }, { "b3_q", 4 }, { "hs_gain", 4 }, { "hs_freq", 11000 } } },
-            { "LGN Compressor", { { "thresh", -26 }, { "ratio", 4 }, { "attack", 8 }, { "release", 90 }, { "style", 1 } } },
-            { "LGN De-Esser", { { "thresh", -40 }, { "freq", 5500 } } },
-            { "LGN Saturator", { { "mode", 1 }, { "drive", 15 }, { "tone", 0.2f } } },
-            { "LGN Reverb", { { "decay", 3.2f }, { "predelay", 35 }, { "mix", 30 } } },
-            { "LGN Delay", { { "feedback", 55 }, { "mix", 30 } } },
-            { "LGN Limiter", { { "input", 9 }, { "ceiling", -0.5f } } },
-            { "LGN Gravity", { { "key", 9 }, { "scale", 1 }, { "pull", 85 } } } };
-        if (auto it = demo.find(name); it != demo.end())
-            for (auto& [id, v] : it->second)
+        using Settings = std::vector<std::pair<const char*, float>>;
+        // a few settings per plugin so the snapshot shows the plugin doing something; some plugins get two shots
+        static const std::map<juce::String, std::vector<std::pair<juce::String, Settings>>> demo = {
+            { "LGN EQ", { { "", { { "lc_on", 1 }, { "lc_freq", 35 }, { "ls_gain", 3 }, { "ls_freq", 90 }, { "b1_gain", -4.5f }, { "b1_freq", 320 }, { "b1_q", 1.6f },
+                          { "b2_gain", 2.5f }, { "b2_freq", 2400 }, { "b3_gain", -3 }, { "b3_freq", 5200 }, { "b3_q", 4 }, { "hs_gain", 4 }, { "hs_freq", 11000 } } } } },
+            { "LGN Compressor", { { "", { { "thresh", -26 }, { "ratio", 4 }, { "attack", 8 }, { "release", 90 }, { "style", 1 } } } } },
+            { "LGN De-Esser", { { "", { { "thresh", -40 }, { "freq", 5500 } } } } },
+            { "LGN Saturator", { { "", { { "mode", 1 }, { "drive", 15 }, { "tone", 0.2f } } } } },
+            { "LGN Reverb", { { "", { { "decay", 3.2f }, { "predelay", 35 }, { "mix", 30 } } } } },
+            { "LGN Delay", { { "", { { "feedback", 55 }, { "mix", 30 } } } } },
+            { "LGN Limiter", { { "", { { "input", 9 }, { "ceiling", -0.5f } } } } },
+            { "LGN Gravity", { { "", { { "key", 9 }, { "scale", 1 }, { "pull", 85 } } } } },
+            { "LGN Duck", { { "-tempo", { { "mode", 0 }, { "rate", 2 }, { "amount", 80 }, { "release", 55 } } },
+                            { "-kick", { { "mode", 1 }, { "amount", 85 }, { "release", 30 } } } } } };
+        std::vector<std::pair<juce::String, Settings>> shots{ { "", {} } };
+        if (auto it = demo.find(name); it != demo.end()) shots = it->second;
+        for (auto& [suffix, settings] : shots) {
+            setDefaults(*p);
+            for (auto& [id, v] : settings)
                 for (auto* prm : p->getParameters())
                     if (auto* r = dynamic_cast<juce::RangedAudioParameter*>(prm); r && r->getParameterID() == id) r->setValueNotifyingHost(r->convertTo0to1(v));
-        std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
-        check(ed != nullptr, "editor");
-        Signal sig; juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi;
-        for (int k = 0; k < 60; k++) {
-            sig.fill(buf, 512, 0.35f); p->processBlock(buf, midi);
-            juce::Thread::sleep(9); juce::Timer::callPendingTimersSynchronously();
+            TestHead head; p->setPlayHead(&head);
+            p->prepareToPlay(48000, 512);
+            std::unique_ptr<juce::AudioProcessorEditor> ed(p->createEditor());
+            check(ed != nullptr, "editor");
+            Signal sig; KickTrack kick; juce::AudioBuffer<float> buf(juce::jmax(2, p->getTotalNumInputChannels()), 512); juce::MidiBuffer midi;
+            for (int k = 0; k < 280; k++) {
+                sig.fill(buf, 512, 0.35f); if (buf.getNumChannels() > 2) kick.fill(buf, 2, 512);
+                p->processBlock(buf, midi); head.ppq += 512 * 2.0 / 48000;
+                if (k % 3 == 0) { juce::Thread::sleep(3); juce::Timer::callPendingTimersSynchronously(); }
+            }
+            juce::Thread::sleep(40); juce::Timer::callPendingTimersSynchronously();
+            const auto img = ed->createComponentSnapshot(ed->getLocalBounds(), true, 2.0f);
+            const auto f = dir.getChildFile(name.replace(" ", "-").toLowerCase() + suffix + ".png"); f.deleteFile();
+            { juce::FileOutputStream os(f); juce::PNGImageFormat().writeImageToStream(img, os); }
+            std::cout << "  editor " << ed->getWidth() << "x" << ed->getHeight() << " -> " << f.getFullPathName() << "\n";
+            ed->setSize(ed->getWidth() * 3 / 2, ed->getHeight() * 3 / 2);
+            juce::Timer::callPendingTimersSynchronously();
+            ed.reset();
+            p->releaseResources(); p->setPlayHead(nullptr);
         }
-        const auto img = ed->createComponentSnapshot(ed->getLocalBounds(), true, 2.0f);
-        const auto f = dir.getChildFile(name.replace(" ", "-").toLowerCase() + ".png"); f.deleteFile();
-        { juce::FileOutputStream os(f); juce::PNGImageFormat().writeImageToStream(img, os); }
-        std::cout << "  editor " << ed->getWidth() << "x" << ed->getHeight() << " -> " << f.getFullPathName() << "\n";
-        ed->setSize(ed->getWidth() * 3 / 2, ed->getHeight() * 3 / 2);
-        juce::Timer::callPendingTimersSynchronously();
-        ed.reset();
-        p->releaseResources();
     }
     std::cout << (failures ? "FAILED " : "PASS ") << name << " (" << failures << " failures)\n";
     return failures ? 1 : 0;

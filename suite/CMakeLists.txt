@@ -69,6 +69,7 @@ lgn_plugin(LGN_Reverb     LgRv "LGN Reverb"     reverb    "Fx|Reverb"      verb/
 lgn_plugin(LGN_Delay      LgDl "LGN Delay"      delay     "Fx|Delay"       delay/DelayPlugin.cpp)
 lgn_plugin(LGN_Limiter    LgLm "LGN Limiter"    limiter   "Fx|Dynamics"    limit/LimitPlugin.cpp)
 lgn_plugin(LGN_Gravity    LgGv "LGN Gravity"    gravity   "Fx|Pitch Shift" gravity/GravityPlugin.cpp)
+lgn_plugin(LGN_Duck       Duck "LGN Duck"       duck      "Fx|Dynamics"    duck/DuckPlugin.cpp)
 
 # DSP unit tests (no JUCE).
 add_executable(lgn_dsp_test EXCLUDE_FROM_ALL tests/dsp_test.cpp)

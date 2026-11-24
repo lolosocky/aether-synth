@@ -111,12 +111,19 @@ public:
         for (int i = 0; i < n; i++) if (i < rev[(size_t)i]) std::swap(x[i], x[rev[(size_t)i]]);
         for (int len = 2; len <= n; len <<= 1) {
             const int half = len / 2, step = n / len;
-            for (int i = 0; i < n; i += len)
-                for (int j = 0; j < half; j++) {
-                    std::complex<double> w = tw[(size_t)(j * step)]; if (inverse) w = std::conj(w);
-                    const auto u = x[i + j], v = x[i + j + half] * w;
-                    x[i + j] = u + v; x[i + j + half] = u - v;
+            for (int i = 0; i < n; i += len) {
+                { auto& u = x[i], & v = x[i + half]; const auto t = v; v = u - t; u = u + t; }   // j = 0: twiddle is exactly 1
+                for (int j = 1; j < half; j++) {
+                    // complex multiply written out: std::complex's operator* goes through a slow library call
+                    // (__muldc3, which re-checks for infinities); for finite numbers this is the same arithmetic
+                    const auto w = tw[(size_t)(j * step)];
+                    const double wr = w.real(), wi = inverse ? -w.imag() : w.imag();
+                    const auto b = x[i + j + half];
+                    const double vr = b.real() * wr - b.imag() * wi, vi = b.real() * wi + b.imag() * wr;
+                    const auto u = x[i + j];
+                    x[i + j] = { u.real() + vr, u.imag() + vi }; x[i + j + half] = { u.real() - vr, u.imag() - vi };
                 }
+            }
         }
         if (inverse) for (int i = 0; i < n; i++) x[i] /= (double)n;
     }

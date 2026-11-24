@@ -173,6 +173,23 @@ GRAVITY = [
     ("Creative", "Noise to Tone",   gv(100, 10, 100, 80)),
 ]
 
+# ---------------------------------------------------------------- Duck  (rate 0=1/1 1=1/2 2=1/4 3=1/8 4=1/16; mode 0 Tempo, 1 Kick)
+def dk(mode, amount, release, rate=2): return dict(mode=mode, amount=amount, release=release, rate=rate)
+DUCK = [
+    ("Tempo", "Classic 1/4 Pump",   dk(0, 75, 50)),
+    ("Tempo", "Subtle Breathing",   dk(0, 35, 45)),
+    ("Tempo", "Hard EDM Pump",      dk(0, 100, 60)),
+    ("Tempo", "1/8 Groove",         dk(0, 60, 35, rate=3)),
+    ("Tempo", "1/16 Stutter",       dk(0, 85, 20, rate=4)),
+    ("Tempo", "Half-Time Swell",    dk(0, 70, 70, rate=1)),
+    ("Tempo", "Bar Swell",          dk(0, 85, 85, rate=0)),
+    ("Kick", "808 Under Kick",      dk(1, 85, 15)),
+    ("Kick", "Bass Make Room",      dk(1, 70, 30)),
+    ("Kick", "Pad Pump",            dk(1, 85, 60)),
+    ("Kick", "Vocal Nudge",         dk(1, 25, 25)),
+    ("Kick", "Mix Bus Bounce",      dk(1, 30, 35)),
+]
+
 PLUGINS = {
     "eq": (EQ, ["spectrum"]),
     "comp": (COMP, []),
@@ -182,6 +199,7 @@ PLUGINS = {
     "delay": (DELAY, []),
     "limit": (LIMIT, []),
     "gravity": (GRAVITY, ["key", "scale"]),
+    "duck": (DUCK, []),
 }
 
 def num(x):

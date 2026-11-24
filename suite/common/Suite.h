@@ -43,6 +43,8 @@ struct PeakMeter {
 class Processor : public juce::AudioProcessor {
 public:
     Processor(const juce::String& stateName, juce::AudioProcessorValueTreeState::ParameterLayout layout);
+    // for plugins with extra buses (a sidechain input)
+    Processor(const BusesProperties&, const juce::String& stateName, juce::AudioProcessorValueTreeState::ParameterLayout layout);
     juce::AudioProcessorValueTreeState apvts;
     PeakMeter inMeter, outMeter;
     ScopeFeed scopeIn, scopeOut;
@@ -76,8 +78,9 @@ protected:
     // except the ones in `keep` (view-only switches like Listen or Spectrum).
     void setPresets(std::vector<Preset> list, const juce::StringArray& keep = {});
     // Call at the start and end of processBlock.
-    void meterInput(const juce::AudioBuffer<float>& b, int n) { inMeter.feed(b, getTotalNumInputChannels(), n); scopeIn.push(b.getReadPointer(0), getTotalNumInputChannels() > 1 ? b.getReadPointer(1) : nullptr, n); }
-    void meterOutput(const juce::AudioBuffer<float>& b, int n) { outMeter.feed(b, getTotalNumOutputChannels(), n); scopeOut.push(b.getReadPointer(0), getTotalNumOutputChannels() > 1 ? b.getReadPointer(1) : nullptr, n); }
+    // main bus only: a sidechain input must not show up on the meters
+    void meterInput(const juce::AudioBuffer<float>& b, int n) { const int c = juce::jmin(2, getMainBusNumInputChannels()); inMeter.feed(b, c, n); scopeIn.push(b.getReadPointer(0), c > 1 ? b.getReadPointer(1) : nullptr, n); }
+    void meterOutput(const juce::AudioBuffer<float>& b, int n) { const int c = juce::jmin(2, getMainBusNumOutputChannels()); outMeter.feed(b, c, n); scopeOut.push(b.getReadPointer(0), c > 1 ? b.getReadPointer(1) : nullptr, n); }
 private:
     std::map<juce::String, std::atomic<float>*> params;
     std::vector<Preset> presetList{ { "", "Default", {} } };

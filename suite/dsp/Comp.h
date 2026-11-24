@@ -45,6 +45,7 @@ public:
         const bool hp = p.scHpf > 21;
         if (hp) for (auto& f : hpf) f.set(Svf::highpass, sr, p.scHpf, 0.707);
         const double mk = makeupTarget();
+        const double mkGain = dbToGain(mk);   // constant for the block
         for (int i = 0; i < n; i++) {
             // detector input (linked)
             double det = 0;
@@ -59,7 +60,7 @@ public:
             grFast = target > grFast ? target + (grFast - target) * aA : target + (grFast - target) * aR;
             if (p.style == glue) { grSlow = target > grSlow ? target + (grSlow - target) * aAslow : target + (grSlow - target) * aRslow; grDb = std::max(grFast, grSlow * 0.7); }
             else grDb = grFast;
-            const double g = dbToGain(-grDb) * makeup.next(dbToGain(mk));
+            const double g = dbToGain(-grDb) * makeup.next(mkGain);
             const double m = mixS.next(p.mix);
             double outPk = 0;
             for (int c = 0; c < nch; c++) {

@@ -58,12 +58,12 @@ static const json* walk(const json& root, const std::string& path) {
 // ------------------------------------------------------------------ control
 Control::Control(AetherProcessor& p, Kind k, std::string pth, juce::String lbl) : proc(p), kind(k), path(std::move(pth)), text(std::move(lbl)) {
     label.setText(text, juce::dontSendNotification); label.setJustificationType(kind == Kind::knob ? juce::Justification::centred : juce::Justification::centredLeft);
-    label.setFont(ui::font(13.0f, true)); label.setColour(juce::Label::textColourId, ui::text.withAlpha(0.8f)); label.setMinimumHorizontalScale(0.7f); label.getProperties().set("caps", true);
+    label.setFont(station::caps(10.0f)); label.setColour(juce::Label::textColourId, kind == Kind::knob ? station::dim : station::ink); label.setMinimumHorizontalScale(0.7f); label.getProperties().set("caps", true);
     label.setInterceptsMouseClicks(false, false);
     if (kind == Kind::knob) {
         slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         slider.setTextBoxStyle(juce::Slider::TextBoxBelow, true, 70, 15);
-        slider.setColour(juce::Slider::textBoxTextColourId, ui::text.withAlpha(0.75f)); slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        slider.setColour(juce::Slider::textBoxTextColourId, station::ink); slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         slider.onValueChange = [this] { if (!loading && !att) push(slider.getValue()); };
         addAndMakeVisible(slider); addAndMakeVisible(label);
     } else if (kind == Kind::menu) {
@@ -534,7 +534,7 @@ public:
     explicit CrateView(AetherProcessor& p) : proc(p) {}
     void paint(juce::Graphics& g) override {
         auto r = getLocalBounds().toFloat();
-        g.setColour(ui::bg); g.fillRoundedRectangle(r, 6);
+        station::drawWell(g, r, 8);
         auto buf = proc.crateSnapshot();
         if (!buf || buf->len <= 0) { g.setColour(ui::dim); g.setFont(juce::FontOptions(13.0f)); g.drawText("Turn Crate Mode on to press this preset into a loop.", r, juce::Justification::centred); return; }
         const int W = juce::jmax(1, (int)r.getWidth()); const float mid = r.getCentreY(), hh = r.getHeight() * 0.45f;

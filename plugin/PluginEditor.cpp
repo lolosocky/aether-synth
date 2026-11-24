@@ -14,52 +14,44 @@ void OrbPad::mouseUp(const juce::MouseEvent&) { if (held) { px->endChangeGesture
 void OrbPad::mouseDoubleClick(const juce::MouseEvent&) { for (auto* p : { px, py }) { p->beginChangeGesture(); p->setValueNotifyingHost(p->convertTo0to1(0)); p->endChangeGesture(); } }
 void OrbPad::paint(juce::Graphics& g) {
     auto r = getLocalBounds().toFloat();
-    ui::drawRecess(g, r, 4);
-    const auto in = r.reduced(12);
-    // dot grid, like a touch surface
+    station::drawWell(g, r, 10);
+    const auto in = r.reduced(14);
+    // dot grid, like a touch surface; the centre lines are a touch darker
     for (int i = 0; i <= 8; i++) for (int j = 0; j <= 8; j++) {
         const float x = in.getX() + in.getWidth() * i / 8, y = in.getY() + in.getHeight() * j / 8;
-        g.setColour((i == 4 || j == 4) ? ui::accent.withAlpha(0.25f) : juce::Colours::white.withAlpha(0.10f)); g.fillEllipse(x - 1.2f, y - 1.2f, 2.4f, 2.4f);
+        g.setColour((i == 4 || j == 4) ? station::faint : station::hairline); g.fillEllipse(x - 1.3f, y - 1.3f, 2.6f, 2.6f);
     }
     auto toPt = [&in](float x, float y) { return juce::Point<float>(in.getCentreX() + x * in.getWidth() / 2, in.getCentreY() - y * in.getHeight() / 2); };
     const auto set = toPt(px->convertFrom0to1(px->getValue()), py->convertFrom0to1(py->getValue()));
     const auto live = toPt(proc.orbX.load(), proc.orbY.load());
-    g.setColour(ui::accent.withAlpha(0.18f)); g.drawHorizontalLine((int)live.y, in.getX(), in.getRight()); g.drawVerticalLine((int)live.x, in.getY(), in.getBottom());
-    g.setColour(ui::dim); g.drawEllipse(set.x - 8, set.y - 8, 16, 16, 1.2f);
-    for (int k = 5; k >= 1; k--) { g.setColour(ui::accent.withAlpha(0.06f * (6 - k))); const float sz = 10.0f + k * 8; g.fillEllipse(live.x - sz / 2, live.y - sz / 2, sz, sz); }
-    g.setColour(ui::accent.brighter(0.4f)); g.fillEllipse(live.x - 6, live.y - 6, 12, 12);
-    g.setColour(juce::Colours::white.withAlpha(0.8f)); g.fillEllipse(live.x - 2.5f, live.y - 2.5f, 5, 5);
-    ui::drawEngraved(g, "X", in.toNearestInt().removeFromBottom(14).removeFromRight(14), juce::Justification::centred, 11);
-    ui::drawEngraved(g, "Y", in.toNearestInt().removeFromTop(14).removeFromLeft(14), juce::Justification::centred, 11);
+    g.setColour(ui::accent.withAlpha(0.28f)); g.drawHorizontalLine((int)live.y, in.getX(), in.getRight()); g.drawVerticalLine((int)live.x, in.getY(), in.getBottom());
+    g.setColour(station::faint); g.drawEllipse(set.x - 9, set.y - 9, 18, 18, 1.2f);
+    for (int k = 4; k >= 1; k--) { g.setColour(ui::accent.withAlpha(0.05f * (5 - k))); const float sz = 12.0f + k * 9; g.fillEllipse(live.x - sz / 2, live.y - sz / 2, sz, sz); }
+    station::drawShadow(g, { live.x - 8, live.y - 8, 16, 16 }, 8, 0.8f);
+    g.setColour(ui::accent); g.fillEllipse(live.x - 8, live.y - 8, 16, 16);
+    g.setColour(juce::Colours::white); g.fillEllipse(live.x - 3, live.y - 3, 6, 6);
+    station::drawCaps(g, "X", in.withTrimmedTop(in.getHeight() - 14).withTrimmedLeft(in.getWidth() - 14), juce::Justification::centred, 9.5f, station::faint);
+    station::drawCaps(g, "Y", in.withHeight(14).withWidth(14), juce::Justification::centred, 9.5f, station::faint);
 }
 
 // ------------------------------------------------------------------ keys
 void HardwareKeys::drawWhiteNote(int note, juce::Graphics& g, juce::Rectangle<float> a, bool down, bool over, juce::Colour, juce::Colour) {
-    const auto k = a.reduced(0.6f, 0);
-    const float lip = down ? 3.0f : 7.0f;
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xffd8d4cb), k.getX(), k.getY(), juce::Colour(0xfff4f1ea), k.getX(), k.getBottom() - lip, false));
-    g.fillRect(k.withTrimmedBottom(lip));
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xffcfcac0), k.getX(), k.getBottom() - lip, juce::Colour(0xff9c978e), k.getX(), k.getBottom(), false));
-    g.fillRect(k.withTop(k.getBottom() - lip));
-    g.setColour(juce::Colours::black.withAlpha(0.35f)); g.drawVerticalLine((int)a.getRight() - 1, a.getY(), a.getBottom());
-    g.setColour(juce::Colours::white.withAlpha(0.6f)); g.drawVerticalLine((int)a.getX() + 1, a.getY(), a.getBottom() - lip);
-    if (down) { g.setColour(ui::accent.withAlpha(0.45f)); g.fillRect(k.withTrimmedBottom(lip)); }
-    else if (over) { g.setColour(ui::accent.withAlpha(0.12f)); g.fillRect(k); }
+    const auto k = a.reduced(0.5f, 0).withTrimmedBottom(1);
+    g.setColour(juce::Colours::white);
+    g.fillRoundedRectangle(k, 3);
+    if (down) { g.setColour(ui::accent.withAlpha(0.22f)); g.fillRoundedRectangle(k, 3); g.setColour(ui::accent); g.fillRoundedRectangle(k.getX() + 3, k.getBottom() - 5, k.getWidth() - 6, 2.5f, 1.2f); }
+    else if (over) { g.setColour(station::well); g.fillRoundedRectangle(k, 3); }
+    g.setColour(station::hairline); g.drawRoundedRectangle(k.reduced(0.5f), 3, 1.0f);
     if (note % 12 == 0) {
-        g.setFont(ui::font(11.0f, true)); g.setColour(juce::Colour(0xff7a756c));
-        g.drawText(getWhiteNoteText(note), k.withTrimmedBottom(lip + 2).removeFromBottom(14), juce::Justification::centred);
+        g.setFont(station::mono(9.5f)); g.setColour(station::faint);
+        g.drawText(getWhiteNoteText(note), k.withTrimmedBottom(7).removeFromBottom(12), juce::Justification::centred);
     }
 }
 void HardwareKeys::drawBlackNote(int, juce::Graphics& g, juce::Rectangle<float> a, bool down, bool over, juce::Colour) {
-    g.setColour(juce::Colours::black.withAlpha(0.45f)); g.fillRoundedRectangle(a.translated(1.5f, 2.0f), 2);
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff2a2b2e), a.getX(), a.getY(), juce::Colour(0xff060607), a.getX(), a.getBottom(), false));
-    g.fillRoundedRectangle(a, 2);
-    const auto top = a.reduced(a.getWidth() * 0.16f, 0).withTrimmedBottom(down ? 4.0f : 9.0f);
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff17181a), top.getX(), top.getY(), juce::Colour(0xff3a3c40), top.getX(), top.getBottom(), false));
-    g.fillRoundedRectangle(top, 1.5f);
-    g.setColour(juce::Colours::white.withAlpha(0.22f)); g.drawLine(top.getX() + 1, top.getBottom() - 1, top.getRight() - 1, top.getBottom() - 1, 1.0f);
-    if (down) { g.setColour(ui::accent.withAlpha(0.6f)); g.fillRoundedRectangle(top, 1.5f); }
-    else if (over) { g.setColour(ui::accent.withAlpha(0.2f)); g.fillRoundedRectangle(a, 2); }
+    const auto k = a.reduced(a.getWidth() * 0.06f, 0);
+    g.setColour(juce::Colour(0xff1a2030).withAlpha(0.18f)); g.fillRoundedRectangle(k.translated(0, 1.5f), 3);
+    g.setColour(down ? ui::accent : (over ? station::graphite.brighter(0.25f) : station::graphite)); g.fillRoundedRectangle(k, 3);
+    g.setColour(juce::Colours::white.withAlpha(down ? 0.0f : 0.08f)); g.fillRoundedRectangle(k.reduced(2).withHeight(k.getHeight() * 0.55f), 2);
 }
 
 // ------------------------------------------------------------------ knob
@@ -69,7 +61,7 @@ Knob::Knob(juce::AudioProcessorValueTreeState& s, const char* id, const juce::St
     slider.setDoubleClickReturnValue(true, (double)s.getParameter(id)->convertFrom0to1(s.getParameter(id)->getDefaultValue()));
     addAndMakeVisible(slider);
     label.setText(text, juce::dontSendNotification); label.setJustificationType(juce::Justification::centred);
-    label.setFont(ui::font(14.0f, true)); label.setColour(juce::Label::textColourId, ui::text.withAlpha(0.85f)); label.setMinimumHorizontalScale(0.7f); label.getProperties().set("caps", true);
+    label.setFont(station::caps(10.5f)); label.setColour(juce::Label::textColourId, station::dim); label.setMinimumHorizontalScale(0.7f); label.getProperties().set("caps", true);
     addAndMakeVisible(label);
     att = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(s, id, slider);
 }
@@ -81,7 +73,7 @@ AetherEditor::AetherEditor(AetherProcessor& p)
     setLookAndFeel(&look);
     const auto& lib = Library::get();
 
-    search.setTextToShowWhenEmpty("SEARCH PRESETS / TAGS", ui::lcdDim); search.setJustification(juce::Justification::centredLeft); search.setIndents(8, 0); search.setFont(ui::mono(14.0f));
+    search.setTextToShowWhenEmpty("Search presets and tags", station::faint); search.setJustification(juce::Justification::centredLeft); search.setIndents(12, 0); search.setFont(station::sans(13.5f, station::regular));
     search.onTextChange = [this] { refilter(); };
     addAndMakeVisible(search);
     catBox.addItem("All categories (" + juce::String((int)lib.entries.size()) + ")", 1);
@@ -89,7 +81,7 @@ AetherEditor::AetherEditor(AetherProcessor& p)
     catBox.setSelectedId(1, juce::dontSendNotification);
     catBox.onChange = [this] { refilter(); };
     addAndMakeVisible(catBox);
-    list.setRowHeight(24); list.setColour(juce::ListBox::outlineColourId, juce::Colours::black); list.setOutlineThickness(1);
+    list.setRowHeight(30); list.setOutlineThickness(0);
     addAndMakeVisible(list);
 
     prev.onClick = [this] { proc.stepPreset(-1, &shown); };
@@ -98,10 +90,10 @@ AetherEditor::AetherEditor(AetherProcessor& p)
     prev.setButtonText(juce::String::fromUTF8("\xe2\x97\x80")); next.setButtonText(juce::String::fromUTF8("\xe2\x96\xb6"));
     for (auto* b : { &prev, &next, &rnd }) addAndMakeVisible(b);
 
-    nameLabel.setFont(ui::mono(30.0f)); nameLabel.setColour(juce::Label::textColourId, ui::lcdText); nameLabel.setMinimumHorizontalScale(0.6f); addAndMakeVisible(nameLabel);
-    catLabel.setFont(ui::mono(14.0f)); catLabel.setColour(juce::Label::textColourId, ui::lcdText.withAlpha(0.7f)); addAndMakeVisible(catLabel);
-    statusLabel.setFont(ui::mono(14.0f)); statusLabel.setColour(juce::Label::textColourId, ui::lcdText.withAlpha(0.7f)); statusLabel.setJustificationType(juce::Justification::centredRight); addAndMakeVisible(statusLabel);
-    sectionLcd.setFont(ui::mono(14.0f)); sectionLcd.setColour(juce::Label::textColourId, ui::lcdText.withAlpha(0.7f)); sectionLcd.setJustificationType(juce::Justification::centredRight); addAndMakeVisible(sectionLcd);
+    nameLabel.setFont(station::sans(26.0f, station::medium)); nameLabel.setColour(juce::Label::textColourId, station::ink); nameLabel.setMinimumHorizontalScale(0.6f); addAndMakeVisible(nameLabel);
+    catLabel.setFont(station::mono(11.0f)); catLabel.setColour(juce::Label::textColourId, station::dim); addAndMakeVisible(catLabel);
+    statusLabel.setFont(station::mono(11.0f)); statusLabel.setColour(juce::Label::textColourId, station::dim); statusLabel.setJustificationType(juce::Justification::centredRight); addAndMakeVisible(statusLabel);
+    sectionLcd.setFont(station::mono(11.0f)); sectionLcd.setColour(juce::Label::textColourId, station::dim); sectionLcd.setJustificationType(juce::Justification::centredRight); addAndMakeVisible(sectionLcd);
     for (auto* l : { &nameLabel, &catLabel, &statusLabel, &sectionLcd }) l->setInterceptsMouseClicks(false, false);
 
 
@@ -115,13 +107,13 @@ AetherEditor::AetherEditor(AetherProcessor& p)
     for (int i = 0; i < 4; i++) { layers[i] = std::make_unique<Knob>(p.apvts, lid[i], "Layer"); addAndMakeVisible(*layers[i]); }
     volume = std::make_unique<Knob>(p.apvts, "volume", "Volume"); addAndMakeVisible(*volume);
 
-    keys.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xffe9e6df));
-    keys.setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xff17181a));
-    keys.setColour(juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colour(0xff8c8a85));
-    keys.setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, ui::accent.withAlpha(0.75f));
-    keys.setColour(juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, ui::accent.withAlpha(0.25f));
-    keys.setColour(juce::MidiKeyboardComponent::shadowColourId, juce::Colours::black.withAlpha(0.5f));
-    keys.setColour(juce::MidiKeyboardComponent::textLabelColourId, juce::Colour(0xff6b6862));
+    keys.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colours::white);
+    keys.setColour(juce::MidiKeyboardComponent::blackNoteColourId, station::graphite);
+    keys.setColour(juce::MidiKeyboardComponent::keySeparatorLineColourId, station::hairline);
+    keys.setColour(juce::MidiKeyboardComponent::shadowColourId, juce::Colours::transparentBlack);
+    keys.setColour(juce::MidiKeyboardComponent::textLabelColourId, station::faint);
+    keys.setColour(juce::MidiKeyboardComponent::upDownButtonBackgroundColourId, station::module);
+    keys.setColour(juce::MidiKeyboardComponent::upDownButtonArrowColourId, station::dim);
     keys.setAvailableRange(24, 108); keys.setOctaveForMiddleC(5); keys.setLowestVisibleKey(24);
     addAndMakeVisible(keys);
 
@@ -175,7 +167,7 @@ void AetherEditor::refilter() {
 }
 void AetherEditor::refreshInfo() {
     const auto inf = proc.info();
-    nameLabel.setText(inf.name.toUpperCase() + (proc.isEdited() ? " *" : ""), juce::dontSendNotification);
+    nameLabel.setText(inf.name + (proc.isEdited() ? "  \xe2\x80\xa2 edited" : ""), juce::dontSendNotification);
     if (proc.patchGeneration() != lastGen) { lastGen = proc.patchGeneration(); if (page > 0) pages[page - 1]->rebuild(); }
     {
         const auto& lib = Library::get(); const int idx = proc.currentIndex();
@@ -200,81 +192,72 @@ void AetherEditor::paintListBoxItem(int row, juce::Graphics& g, int w, int h, bo
     if (row < 0 || row >= (int)shown.size()) return;
     const auto& e = Library::get().entries[(size_t)shown[(size_t)row]];
     const bool cur = shown[(size_t)row] == proc.currentIndex();
-    if (cur) { g.setColour(ui::lcdText); g.fillRect(0, 1, w, h - 2); }
-    else if (row % 2) { g.setColour(juce::Colours::white.withAlpha(0.02f)); g.fillRect(0, 0, w, h); }
-    g.setFont(ui::mono(15.0f)); g.setColour(cur ? ui::lcdBg : ui::lcdText);
-    g.drawText(juce::String(e.name).toUpperCase(), 10, 0, w - 112, h, juce::Justification::centredLeft, true);
-    g.setFont(ui::mono(11.5f)); g.setColour(cur ? ui::lcdBg.withAlpha(0.8f) : ui::lcdDim.brighter(0.4f));
-    g.drawText(juce::String(e.cat).toUpperCase(), w - 110, 0, 102, h, juce::Justification::centredRight, true);
+    if (cur) {
+        g.setColour(station::well); g.fillRoundedRectangle(2.0f, 1.0f, w - 4.0f, h - 2.0f, 7);
+        g.setColour(ui::accent); g.fillRoundedRectangle(6.0f, h * 0.5f - 7, 3.0f, 14.0f, 1.5f);
+    }
+    g.setFont(station::sans(13.5f, cur ? station::medium : station::regular)); g.setColour(station::ink);
+    g.drawText(juce::String(e.name), 16, 0, w - 124, h, juce::Justification::centredLeft, true);
+    g.setFont(station::mono(10.0f)); g.setColour(cur ? station::dim : station::faint);
+    g.drawText(juce::String(e.cat).toUpperCase(), w - 116, 0, 106, h, juce::Justification::centredRight, true);
 }
 void AetherEditor::listBoxItemClicked(int row, const juce::MouseEvent&) { if (row >= 0 && row < (int)shown.size()) proc.loadPreset(shown[(size_t)row]); }
 
 void AetherEditor::paint(juce::Graphics& g) {
-    // chassis with end cheeks
-    g.fillAll(ui::bg);
-    const auto b = getLocalBounds().toFloat();
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff222428), 0, 0, juce::Colour(0xff121315), 0, b.getHeight(), false));
-    g.fillRect(b);
-    g.setTiledImageFill(ui::anodizedTile(), 0, 0, 1.0f); g.fillRect(b);
-    g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.03f), 0, 0, juce::Colours::black.withAlpha(0.35f), 0, b.getHeight(), false)); g.fillRect(b);
-    ui::drawWoodCheek(g, { 0.0f, 0.0f, 16.0f, b.getHeight() });
-    ui::drawWoodCheek(g, { b.getWidth() - 16, 0.0f, 16.0f, b.getHeight() });
-    // header plate: brand + display
-    const auto head = juce::Rectangle<float>(24, 10, b.getWidth() - 48, 92);
-    ui::drawBrushedPlate(g, head, true);
+    g.fillAll(station::hull);
+    // header module: wordmark, display, preset buttons
+    station::drawModule(g, header.toFloat());
     {
-        auto br = head.reduced(26, 0).withWidth(200).toNearestInt();
-        g.setFont(juce::Font(ui::font(40.0f, true)).withExtraKerningFactor(0.18f));
-        g.setColour(juce::Colours::white.withAlpha(0.45f)); g.drawText("AETHER", br.withTrimmedBottom(18).translated(0, 1), juce::Justification::bottomLeft);
-        g.setColour(juce::Colour(0xff141516)); g.drawText("AETHER", br.withTrimmedBottom(18), juce::Justification::bottomLeft);
-        ui::drawPrinted(g, "LAYERED SYNTHESIS ENGINE", br.withTrimmedTop(br.getHeight() - 24).withTrimmedBottom(6), juce::Justification::topLeft, 11.5f, juce::Colour(0xff2a2b2d));
+        const auto br = header.reduced(22, 0).withWidth(230).toFloat();
+        station::drawWordmark(g, br.withTrimmedBottom(14), "Aether", {}, ui::accent);
+        g.setFont(station::mono(10.0f)); g.setColour(station::faint);
+        g.drawText("LAYERED SYNTHESIS ENGINE", br.withTrimmedLeft(22).withTrimmedTop(br.getHeight() * 0.5f + 6).withHeight(14), juce::Justification::centredLeft, false);
     }
-    ui::drawLcd(g, lcdArea.toFloat());
-    // browser and the play page plates
-    ui::drawPlate(g, browserPlate.toFloat(), "Library");
+    station::drawWell(g, lcdArea.toFloat(), 10);
+    // library, play page modules, keyboard bed
+    station::drawModule(g, browserPlate.toFloat(), "Library", {}, juce::String(Library::get().entries.size()) + " presets");
     if (page == 0) {
         static const char* titles[4] = { "Macros", "Shape", "Layers & Output", "Orb" };
-        for (int i = 0; i < 4; i++) ui::drawPlate(g, playPlates[i].toFloat(), titles[i]);
+        static const char* codes[4] = { "M-01", "S-02", "L-03", "O-04" };
+        for (int i = 0; i < 4; i++) station::drawModule(g, playPlates[i].toFloat(), titles[i], {}, codes[i]);
     }
-    // keyboard bed
-    const auto kb = keys.getBounds().toFloat().expanded(8, 8);
-    ui::drawPlate(g, kb.withTrimmedTop(-4));
-    g.setColour(juce::Colour(0xff7a1f12)); g.fillRect(keys.getX() - 1.0f, keys.getY() - 4.0f, keys.getWidth() + 2.0f, 4.0f);   // felt strip
+    station::drawModule(g, keys.getBounds().toFloat().expanded(10, 10));
 }
 void AetherEditor::resized() {
-    auto r = getLocalBounds().reduced(16, 10).withTrimmedLeft(12).withTrimmedRight(12);
+    auto r = getLocalBounds().reduced(20, 16);
     // header
-    auto head = r.removeFromTop(92).reduced(26, 12);
-    head.removeFromLeft(210);
+    header = r.removeFromTop(80);
+    auto head = header.reduced(22, 14);
+    head.removeFromLeft(240);
     {
-        auto btns = head.removeFromRight(196).withSizeKeepingCentre(196, 46);
+        auto btns = head.removeFromRight(196).withSizeKeepingCentre(196, 40);
         prev.setBounds(btns.removeFromLeft(48)); btns.removeFromLeft(6); next.setBounds(btns.removeFromLeft(48)); btns.removeFromLeft(6); rnd.setBounds(btns);
         head.removeFromRight(14);
         lcdArea = head.reduced(4, 2);
-        auto l = lcdArea.reduced(12, 3);
-        auto top = l.removeFromTop(18);
+        auto l = lcdArea.reduced(16, 6);
+        auto top = l.removeFromTop(16);
         catLabel.setBounds(top.removeFromLeft(top.getWidth() / 2));
         statusLabel.setBounds(top.removeFromRight(90)); sectionLcd.setBounds(top);
         nameLabel.setBounds(l);
     }
-    r.removeFromTop(12);
-    keys.setBounds(r.removeFromBottom(84).reduced(10, 0).withTrimmedBottom(8)); keys.setKeyWidth(keys.getWidth() / 50.0f);
-    r.removeFromBottom(18);
+    r.removeFromTop(14);
+    keys.setBounds(r.removeFromBottom(86).reduced(10, 0).withTrimmedBottom(10)); keys.setKeyWidth(keys.getWidth() / 50.0f);
+    r.removeFromBottom(24);
     // library
     browserPlate = r.removeFromLeft(juce::jmax(290, r.getWidth() * 28 / 100));
     {
-        auto left = browserPlate.reduced(12).withTrimmedTop(18);
+        auto left = browserPlate.reduced(14).withTrimmedTop(station::kModuleTitle - 10);
         catBox.setBounds(left.removeFromTop(32)); left.removeFromTop(8);
-        search.setBounds(left.removeFromTop(32)); left.removeFromTop(8);
+        search.setBounds(left.removeFromTop(32)); left.removeFromTop(10);
         list.setBounds(left);
     }
     r.removeFromLeft(14);
     {
-        auto tabs = r.removeFromTop(40);
+        auto tabs = r.removeFromTop(36);
         const int tw = juce::jmin(96, (tabs.getWidth() - 6 * kPages) / (kPages + 1));
         for (auto& t : pageTabs) { t.setBounds(tabs.removeFromLeft(tw)); tabs.removeFromLeft(6); }
     }
-    r.removeFromTop(10);
+    r.removeFromTop(14);
     centre = r;
     for (auto& s : scrollers) if (s) s->setBounds(r);
     if (page != 0) return;
@@ -285,12 +268,12 @@ void AetherEditor::resized() {
     const int mh = r.getHeight() * 55 / 100;
     playPlates[0] = r.removeFromTop(mh); r.removeFromTop(10); playPlates[1] = r;
     auto knobRow = [](juce::Rectangle<int> area, std::unique_ptr<Knob>* ks, int n) { const int w = area.getWidth() / n; for (int i = 0; i < n; i++) ks[i]->setBounds(area.removeFromLeft(w).reduced(4, 0)); };
-    knobRow(playPlates[0].reduced(10, 8).withTrimmedTop(16), macros, 4);
-    knobRow(playPlates[1].reduced(10, 8).withTrimmedTop(16), perf, 6);
+    knobRow(playPlates[0].reduced(12, 10).withTrimmedTop(station::kModuleTitle - 6), macros, 4);
+    knobRow(playPlates[1].reduced(12, 10).withTrimmedTop(station::kModuleTitle - 6), perf, 6);
     {
-        auto lr = playPlates[2].reduced(10, 8).withTrimmedTop(16); const int w = lr.getWidth() / 6;
+        auto lr = playPlates[2].reduced(12, 10).withTrimmedTop(station::kModuleTitle - 6); const int w = lr.getWidth() / 6;
         for (int i = 0; i < 4; i++) layers[i]->setBounds(lr.removeFromLeft(w).reduced(4, 0));
         lr.removeFromLeft(w / 2); volume->setBounds(lr.removeFromLeft(w).reduced(4, 0));
     }
-    orb.setBounds(playPlates[3].reduced(12).withTrimmedTop(16));
+    orb.setBounds(playPlates[3].reduced(14).withTrimmedTop(station::kModuleTitle - 10));
 }

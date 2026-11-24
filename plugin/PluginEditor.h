@@ -21,7 +21,7 @@ private:
     AetherProcessor& proc; juce::RangedAudioParameter* px; juce::RangedAudioParameter* py; bool held = false;
 };
 
-// Keyboard drawn like real keys: ivory with a front lip, glossy black keys with a bevel.
+// Keyboard in the Station look: white keys with hairline edges, graphite black keys, accent when held.
 class HardwareKeys : public juce::MidiKeyboardComponent {
 public:
     using juce::MidiKeyboardComponent::MidiKeyboardComponent;
@@ -72,7 +72,7 @@ private:
     std::unique_ptr<edit::Page> pages[kPages];
     std::unique_ptr<edit::Scroller> scrollers[kPages];
     int page = 0, lastGen = -1;
-    juce::Rectangle<int> centre, lcdArea, browserPlate, playPlates[4];
+    juce::Rectangle<int> header, centre, lcdArea, browserPlate, playPlates[4];
     juce::Label sectionLcd;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AetherEditor)
 };

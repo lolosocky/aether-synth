@@ -1,59 +1,32 @@
-// Hardware-style visual language for Aether: anodised panels, machined knobs with LED rings, latching buttons with LEDs,
-// an amber display. Every page draws through these helpers so the whole plugin reads as one instrument.
+// Aether's visual language: the shared Station look (white modules, hairlines, soft shadows) with Aether's
+// mission-orange accent. The ui:: names are kept so every page draws through one place.
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "Station.h"
 
 namespace ui {
 // palette
-const juce::Colour bg{ 0xff17191c },        // chassis
-    panel{ 0xff24272b },                    // raised plate
-    line{ 0xff0b0c0e },                     // grooves and outlines
-    text{ 0xffebe7de },                     // silkscreen
-    dim{ 0xff8f8b83 },                      // secondary print
-    accent{ 0xffff7a1a },                   // LED orange
-    accent2{ 0xffffb54a },                  // amber
-    lcdBg{ 0xff140c04 }, lcdText{ 0xffffb54a }, lcdDim{ 0xff6e4a1e },
-    cap{ 0xff3a3e44 }, capHi{ 0xff5b6068 }, capLo{ 0xff202326 };
+const juce::Colour bg = station::hull,          // window
+    panel = station::module,                    // raised modules
+    line = station::hairline,                   // edges and separators
+    text = station::ink,                        // primary text
+    dim = station::dim,                         // secondary text
+    accent = station::accents::aether,          // mission orange
+    accent2 = station::graphite,                // waveforms and secondary marks
+    lcdBg = station::well, lcdText = station::ink, lcdDim = station::faint;
 
-const juce::Typeface::Ptr& typeface(int which);   // 0 condensed medium, 1 condensed bold, 2 mono
-inline juce::FontOptions font(float h, bool bold = false) { return juce::FontOptions(typeface(bold ? 1 : 0)).withHeight(h); }
-inline juce::FontOptions mono(float h) { return juce::FontOptions(typeface(2)).withHeight(h); }
+inline juce::FontOptions font(float h, bool bold = false) { return station::sans(h, bold ? station::bold : station::medium); }
+inline juce::FontOptions mono(float h) { return station::mono(h); }
 
-void drawScrew(juce::Graphics&, float cx, float cy, float r, float angle);
-void drawPlate(juce::Graphics&, juce::Rectangle<float>, const juce::String& title = {}, bool screws = false);
-void drawRecess(juce::Graphics&, juce::Rectangle<float>, float radius = 3.0f);
-void drawLed(juce::Graphics&, juce::Rectangle<float>, bool on, juce::Colour c = accent);
-void drawLcd(juce::Graphics&, juce::Rectangle<float>);
-void drawEngraved(juce::Graphics&, const juce::String&, juce::Rectangle<int>, juce::Justification, float size = 12.0f);
-void drawPrinted(juce::Graphics&, const juce::String&, juce::Rectangle<int>, juce::Justification, float size, juce::Colour ink);
-// procedural materials, cached
-const juce::Image& anodizedTile();                 // fine grain dark metal, tiles seamlessly
-juce::Image brushed(int w, int h, juce::Colour base);
-juce::Image walnut(int w, int h);
-const juce::Image& spunCap(int diameter);          // turned aluminium knob cap with a ring highlight
-void drawBrushedPlate(juce::Graphics&, juce::Rectangle<float>, bool screws);
-void drawWoodCheek(juce::Graphics&, juce::Rectangle<float>);
+inline void drawPlate(juce::Graphics& g, juce::Rectangle<float> r, const juce::String& title = {}, bool = false) { station::drawModule(g, r, title); }
+inline void drawRecess(juce::Graphics& g, juce::Rectangle<float> r, float radius = 8.0f) { station::drawWell(g, r, juce::jmax(radius, 6.0f)); }
+inline void drawLcd(juce::Graphics& g, juce::Rectangle<float> r) { station::drawWell(g, r, 10.0f); }
+inline void drawLed(juce::Graphics& g, juce::Rectangle<float> r, bool on, juce::Colour c = accent) { station::drawDot(g, r.getCentre(), juce::jmin(r.getWidth(), r.getHeight()) * 0.5f + 1, on, c); }
+inline void drawEngraved(juce::Graphics& g, const juce::String& s, juce::Rectangle<int> r, juce::Justification j, float size = 12.0f) { station::drawCaps(g, s, r.toFloat(), j, size * 0.85f, dim); }
+inline void drawPrinted(juce::Graphics& g, const juce::String& s, juce::Rectangle<int> r, juce::Justification j, float size, juce::Colour ink) { station::drawCaps(g, s, r.toFloat(), j, size, ink); }
 }
 
-class AetherLook : public juce::LookAndFeel_V4 {
+class AetherLook : public station::Look {
 public:
-    AetherLook();
-    juce::Typeface::Ptr getTypefaceForFont(const juce::Font&) override;
-    void drawRotarySlider(juce::Graphics&, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider&) override;
-    void drawLinearSlider(juce::Graphics&, int x, int y, int w, int h, float pos, float, float, juce::Slider::SliderStyle, juce::Slider&) override;
-    juce::Label* createSliderTextBox(juce::Slider&) override;
-    void drawButtonBackground(juce::Graphics&, juce::Button&, const juce::Colour&, bool over, bool down) override;
-    void drawButtonText(juce::Graphics&, juce::TextButton&, bool over, bool down) override;
-    juce::Font getTextButtonFont(juce::TextButton&, int h) override;
-    void drawToggleButton(juce::Graphics&, juce::ToggleButton&, bool over, bool down) override;
-    void drawComboBox(juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
-    juce::Font getComboBoxFont(juce::ComboBox&) override;
-    void positionComboBoxText(juce::ComboBox&, juce::Label&) override;
-    juce::Font getPopupMenuFont() override;
-    void drawPopupMenuBackground(juce::Graphics&, int w, int h) override;
-    void fillTextEditorBackground(juce::Graphics&, int w, int h, juce::TextEditor&) override;
-    void drawTextEditorOutline(juce::Graphics&, int w, int h, juce::TextEditor&) override;
-    void drawLabel(juce::Graphics&, juce::Label&) override;
-    void drawScrollbar(juce::Graphics&, juce::ScrollBar&, int x, int y, int w, int h, bool vertical, int thumbStart, int thumbSize, bool over, bool down) override;
-    int getDefaultScrollbarWidth() override { return 10; }
+    AetherLook() : station::Look(ui::accent) {}
 };

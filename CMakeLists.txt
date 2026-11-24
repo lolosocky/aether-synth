@@ -41,9 +41,11 @@ juce_add_plugin(Aether
   VST3_CATEGORIES Instrument Synth
   AU_MAIN_TYPE kAudioUnitType_MusicDevice)
 
-juce_add_binary_data(AetherData SOURCES resources/presets.json.gz resources/fonts/BarlowCondensed_500Medium.ttf resources/fonts/BarlowCondensed_700Bold.ttf resources/fonts/ShareTechMono_400Regular.ttf)
+juce_add_binary_data(AetherData SOURCES resources/presets.json.gz)
+include(shared/station/station.cmake)
 
-target_sources(Aether PRIVATE plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp plugin/Hardware.cpp)
+target_sources(Aether PRIVATE plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp)
+station_use(Aether)
 target_include_directories(Aether PRIVATE src third_party)
 target_compile_definitions(Aether PUBLIC
   JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
@@ -61,20 +63,31 @@ target_include_directories(aether_port_test PRIVATE src third_party)
 
 # Headless test of the real plugin processor.
 juce_add_console_app(aether_plugin_test)
-target_sources(aether_plugin_test PRIVATE tests/plugin_test.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp plugin/Hardware.cpp)
+target_sources(aether_plugin_test PRIVATE tests/plugin_test.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp)
 target_include_directories(aether_plugin_test PRIVATE src third_party)
 target_compile_definitions(aether_plugin_test PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JucePlugin_Name="Aether")
 target_link_libraries(aether_plugin_test PRIVATE AetherData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+station_use(aether_plugin_test)
 set_target_properties(aether_plugin_test PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 # CPU of the real plugin processor per preset (engine + convolution + output chain).
 juce_add_console_app(aether_plugin_perf)
-target_sources(aether_plugin_perf PRIVATE tests/plugin_perf.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp plugin/Hardware.cpp)
+target_sources(aether_plugin_perf PRIVATE tests/plugin_perf.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp)
 target_include_directories(aether_plugin_perf PRIVATE src third_party)
 target_compile_definitions(aether_plugin_perf PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JucePlugin_Name="Aether")
 target_link_libraries(aether_plugin_perf PRIVATE AetherData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+station_use(aether_plugin_perf)
 set_target_properties(aether_plugin_perf PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 # Engine stress test (no JUCE): CPU, voices cut while audible, and output glitches for every preset.
 add_executable(aether_perf_test EXCLUDE_FROM_ALL tests/perf_test.cpp)
 target_include_directories(aether_perf_test PRIVATE src third_party)
+
+# Renders every page of the editor to PNG files, for reviewing the design without a host.
+juce_add_console_app(aether_snapshot)
+target_sources(aether_snapshot PRIVATE tests/snapshot.cpp plugin/PluginProcessor.cpp plugin/PluginEditor.cpp plugin/EditPages.cpp)
+target_include_directories(aether_snapshot PRIVATE src third_party)
+target_compile_definitions(aether_snapshot PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JucePlugin_Name="Aether")
+target_link_libraries(aether_snapshot PRIVATE AetherData juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags)
+station_use(aether_snapshot)
+set_target_properties(aether_snapshot PROPERTIES EXCLUDE_FROM_ALL TRUE)

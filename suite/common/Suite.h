@@ -55,21 +55,35 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool hasEditor() const override { return true; }
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram(int) override {}
-    const juce::String getProgramName(int) override { return {}; }
+    // Factory presets. Index 0 is always "Default" (every parameter at its default).
+    struct Preset { juce::String category, name; std::vector<std::pair<juce::String, float>> values; };
+    const std::vector<Preset>& presets() const { return presetList; }
+    void loadPreset(int index);
+    int currentPreset() const { return current.load(); }
+    // true when a parameter has moved since the current preset was loaded
+    bool presetModified() const;
+    int getNumPrograms() override { return (int)presetList.size(); }
+    int getCurrentProgram() override { return current.load(); }
+    void setCurrentProgram(int i) override { loadPreset(i); }
+    const juce::String getProgramName(int i) override { return juce::isPositiveAndBelow(i, (int)presetList.size()) ? presetList[(size_t)i].name : juce::String(); }
     void changeProgramName(int, const juce::String&) override {}
     void releaseResources() override {}
     void getStateInformation(juce::MemoryBlock&) override;
     void setStateInformation(const void*, int) override;
 
 protected:
+    // Call from the subclass constructor. Parameters a preset doesn't mention go to their defaults,
+    // except the ones in `keep` (view-only switches like Listen or Spectrum).
+    void setPresets(std::vector<Preset> list, const juce::StringArray& keep = {});
     // Call at the start and end of processBlock.
     void meterInput(const juce::AudioBuffer<float>& b, int n) { inMeter.feed(b, getTotalNumInputChannels(), n); scopeIn.push(b.getReadPointer(0), getTotalNumInputChannels() > 1 ? b.getReadPointer(1) : nullptr, n); }
     void meterOutput(const juce::AudioBuffer<float>& b, int n) { outMeter.feed(b, getTotalNumOutputChannels(), n); scopeOut.push(b.getReadPointer(0), getTotalNumOutputChannels() > 1 ? b.getReadPointer(1) : nullptr, n); }
 private:
     std::map<juce::String, std::atomic<float>*> params;
+    std::vector<Preset> presetList{ { "", "Default", {} } };
+    juce::StringArray keepIds;
+    std::atomic<int> current{ 0 };
+    std::vector<float> loaded;   // normalised values right after the last preset load
 };
 
 // ---------------------------------------------------------------- parameter helpers
@@ -97,8 +111,10 @@ public:
     juce::Slider slider;
     juce::String label;
     bool small;
+    int maxKnob = 72;   // knob diameter cap; the dial centres itself in whatever space it is given
 private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> att;
+    juce::Rectangle<int> labelArea;
 };
 
 // Labelled switch bound to a bool parameter.
@@ -147,6 +163,18 @@ public:
     Mode mode; juce::Colour accent; float shown = 0, hold = 0; int holdAge = 0;
 };
 
+// Scrolling history: level as a soft graphite area rising from the bottom, gain reduction hanging from the top
+// in the accent colour. push() once per UI tick.
+class History : public juce::Component {
+public:
+    explicit History(juce::Colour a, float maxReductionDb = 24.0f) : accent(a), maxGr(maxReductionDb) { inH.assign(kLen, -90); grH.assign(kLen, 0); }
+    void push(float levelDb, float grDb) { inH[(size_t)pos] = levelDb; grH[(size_t)pos] = grDb; pos = (pos + 1) % kLen; repaint(); }
+    void paint(juce::Graphics&) override;
+private:
+    static constexpr int kLen = 150;
+    juce::Colour accent; float maxGr; std::vector<float> inH, grH; int pos = 0;
+};
+
 // Horizontal in/out meter pair for the header.
 class IoMeters : public juce::Component {
 public:
@@ -181,6 +209,19 @@ private:
     void timerCallback() override;
     juce::String name, subtitle;
     IoMeters io;
+    class PresetBar : public juce::Component {
+    public:
+        explicit PresetBar(Processor& p);
+        void paint(juce::Graphics&) override;
+        void resized() override;
+        void mouseUp(const juce::MouseEvent&) override;
+        void tick();
+    private:
+        void step(int d);
+        void openMenu();
+        Processor& proc; juce::TextButton prev{ "<" }, next{ ">" }; int shown = -1; bool modified = false;
+        juce::Rectangle<int> nameArea;
+    } presetBar;
     bool ready = false;
     juce::TooltipWindow tips{ nullptr, 600 };
 };

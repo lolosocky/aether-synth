@@ -17,11 +17,53 @@ bool Processor::isBusesLayoutSupported(const BusesLayout& b) const {
 }
 
 void Processor::getStateInformation(juce::MemoryBlock& dest) {
-    if (auto xml = apvts.copyState().createXml()) copyXmlToBinary(*xml, dest);
+    auto st = apvts.copyState();
+    st.setProperty("preset", current.load(), nullptr);
+    st.setProperty("presetModified", presetModified(), nullptr);
+    if (auto xml = st.createXml()) copyXmlToBinary(*xml, dest);
 }
 void Processor::setStateInformation(const void* data, int size) {
     if (auto xml = getXmlFromBinary(data, size))
-        if (xml->hasTagName(apvts.state.getType())) apvts.replaceState(juce::ValueTree::fromXml(*xml));
+        if (xml->hasTagName(apvts.state.getType())) {
+            auto st = juce::ValueTree::fromXml(*xml);
+            const int pr = juce::jlimit(0, (int)presetList.size() - 1, (int)st.getProperty("preset", 0));
+            const bool mod = (bool)st.getProperty("presetModified", false);
+            apvts.replaceState(st);
+            current = pr;
+            loaded.clear();
+            for (auto* prm : getParameters()) loaded.push_back(mod ? -1.0f : prm->getValue());
+        }
+}
+
+void Processor::setPresets(std::vector<Preset> list, const juce::StringArray& keep) {
+    for (auto& pr : list) {
+        for (auto& [id, v] : pr.values) jassert(params.count(id));   // a typo in a preset would silently do nothing
+        presetList.push_back(std::move(pr));
+    }
+    keepIds = keep;
+}
+void Processor::loadPreset(int index) {
+    if (!juce::isPositiveAndBelow(index, (int)presetList.size())) return;
+    const auto& pr = presetList[(size_t)index];
+    for (auto* prm : getParameters())
+        if (auto* r = dynamic_cast<juce::RangedAudioParameter*>(prm)) {
+            if (keepIds.contains(r->getParameterID())) continue;
+            float v = r->getDefaultValue();
+            for (auto& [id, val] : pr.values) if (id == r->getParameterID()) v = r->convertTo0to1(val);
+            r->beginChangeGesture(); r->setValueNotifyingHost(v); r->endChangeGesture();
+        }
+    current = index;
+    loaded.clear();
+    for (auto* prm : getParameters()) loaded.push_back(prm->getValue());
+}
+bool Processor::presetModified() const {
+    if (loaded.empty()) return false;
+    auto& ps = getParameters();
+    for (int i = 0; i < ps.size() && i < (int)loaded.size(); i++) {
+        if (auto* r = dynamic_cast<juce::RangedAudioParameter*>(ps[i]); r && keepIds.contains(r->getParameterID())) continue;
+        if (std::abs(ps[i]->getValue() - loaded[(size_t)i]) > 1e-4f) return true;
+    }
+    return false;
 }
 
 // ================================================================ parameters
@@ -71,13 +113,18 @@ Dial::Dial(juce::AudioProcessorValueTreeState& s, const char* id, const juce::St
     slider.setTooltip(prm->getName(64));
 }
 void Dial::resized() {
+    const int labelH = small ? 14 : 16, textH = small ? 15 : 17, gap = 4;
     auto r = getLocalBounds();
-    r.removeFromTop(small ? 14 : 16);
-    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, r.getWidth(), small ? 15 : 17);
-    slider.setBounds(r);
+    const int cap = small ? juce::jmin(maxKnob, 54) : maxKnob;
+    const int knob = juce::jmax(24, juce::jmin(cap, juce::jmin(r.getWidth() - 8, r.getHeight() - labelH - textH - gap * 2)));
+    const int total = labelH + gap + knob + textH;
+    auto col = r.withSizeKeepingCentre(r.getWidth(), total);
+    labelArea = col.removeFromTop(labelH); col.removeFromTop(gap);
+    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, r.getWidth(), textH);
+    slider.setBounds(col.withSizeKeepingCentre(juce::jmax(knob, r.getWidth()), col.getHeight()));
 }
 void Dial::paint(juce::Graphics& g) {
-    drawCaps(g, label, getLocalBounds().removeFromTop(small ? 14 : 16).toFloat(), juce::Justification::centred, small ? 9.0f : 9.5f, dim);
+    drawCaps(g, label, labelArea.toFloat(), juce::Justification::centred, small ? 9.0f : 9.5f, dim);
 }
 
 Switch::Switch(juce::AudioProcessorValueTreeState& s, const char* id, const juce::String& l) {
@@ -143,6 +190,30 @@ void Meter::paint(juce::Graphics& g) {
     }
 }
 
+void History::paint(juce::Graphics& g) {
+    const auto r = getLocalBounds().toFloat();
+    drawWell(g, r, 10);
+    const auto in = r.reduced(10);
+    const int step = maxGr > 12 ? 6 : 3;
+    for (int db = step; db < (int)maxGr; db += step) {
+        const float y = in.getY() + in.getHeight() * db / maxGr;
+        g.setColour(hairline.withAlpha(0.7f)); g.drawHorizontalLine((int)y, in.getX(), in.getRight());
+        g.setFont(mono(9.0f)); g.setColour(faint); g.drawText("-" + juce::String(db), juce::Rectangle<float>(in.getRight() - 28, y + 1, 26, 11), juce::Justification::right);
+    }
+    juce::Path lvl, gr; const float dx = in.getWidth() / (kLen - 1);
+    lvl.startNewSubPath(in.getX(), in.getBottom()); gr.startNewSubPath(in.getX(), in.getY());
+    for (int i = 0; i < kLen; i++) {
+        const int k = (pos + i) % kLen; const float x = in.getX() + i * dx;
+        lvl.lineTo(x, in.getBottom() - in.getHeight() * juce::jlimit(0.0f, 1.0f, (inH[(size_t)k] + 60) / 60));
+        gr.lineTo(x, in.getY() + in.getHeight() * juce::jlimit(0.0f, 1.0f, grH[(size_t)k] / maxGr));
+    }
+    lvl.lineTo(in.getRight(), in.getBottom()); lvl.closeSubPath();
+    juce::Path grFill(gr); grFill.lineTo(in.getRight(), in.getY()); grFill.closeSubPath();
+    g.setColour(juce::Colour(0xffe2e6eb)); g.fillPath(lvl);
+    g.setColour(accent.withAlpha(0.16f)); g.fillPath(grFill);
+    g.setColour(accent); g.strokePath(gr, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
 void IoMeters::tick() {
     auto step = [](float& s, float v) { const float t = juce::jlimit(0.0f, 1.0f, ((float)gainToDb(v) + 60.0f) / 60.0f); s = t > s ? t : s + (t - s) * 0.2f; };
     step(in, proc.inMeter.take()); step(out, proc.outMeter.take()); repaint();
@@ -162,12 +233,13 @@ void IoMeters::paint(juce::Graphics& g) {
 
 // ================================================================ editor
 Editor::Editor(Processor& p, const juce::String& n, const juce::String& sub, juce::Colour a, int w, int h)
-    : AudioProcessorEditor(&p), accent(a), proc(p), look(a), designW(w), designH(h), name(n), subtitle(sub), io(p) {
+    : AudioProcessorEditor(&p), accent(a), proc(p), look(a), designW(w), designH(h), name(n), subtitle(sub), io(p), presetBar(p) {
     setLookAndFeel(&look);
     body.ed = this;
     body.setSize(w, h);
     addAndMakeVisible(body);
     body.addAndMakeVisible(io);
+    body.addAndMakeVisible(presetBar);
     tips.setLookAndFeel(&look);
     setResizable(true, true);
     getConstrainer()->setFixedAspectRatio((double)w / h);
@@ -183,6 +255,7 @@ void Editor::resized() {
     auto r = juce::Rectangle<int>(designW, designH).reduced(16);
     auto head = r.removeFromTop(52);
     io.setBounds(head.removeFromRight(190).reduced(16, 9));
+    presetBar.setBounds(head.removeFromRight(290).reduced(0, 10));
     r.removeFromTop(12);
     layout(r);
 }
@@ -195,7 +268,65 @@ void Editor::Body::paint(juce::Graphics& g) {
     ed->paintBody(g);
 }
 void Editor::module(juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title, const juce::String& code) { drawModule(g, r.toFloat(), title, accent, code); }
-void Editor::timerCallback() { io.tick(); tick(); }
+void Editor::timerCallback() { io.tick(); presetBar.tick(); tick(); }
+
+// ---------------------------------------------------------------- preset bar
+Editor::PresetBar::PresetBar(Processor& p) : proc(p) {
+    for (auto* b : { &prev, &next }) { addAndMakeVisible(b); b->setTooltip(b == &prev ? "Previous preset" : "Next preset"); }
+    prev.onClick = [this] { step(-1); }; next.onClick = [this] { step(1); };
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+}
+void Editor::PresetBar::resized() {
+    auto r = getLocalBounds();
+    next.setBounds(r.removeFromRight(r.getHeight())); r.removeFromRight(4);
+    prev.setBounds(r.removeFromRight(r.getHeight())); r.removeFromRight(6);
+    nameArea = r;
+}
+void Editor::PresetBar::paint(juce::Graphics& g) {
+    const auto r = nameArea.toFloat();
+    drawWell(g, r, 6);
+    const auto& ps = proc.presets(); const int i = juce::jlimit(0, (int)ps.size() - 1, proc.currentPreset());
+    auto t = r.reduced(12, 0);
+    if (ps[(size_t)i].category.isNotEmpty()) {
+        g.setFont(caps(9.0f)); g.setColour(dim);
+        const auto cat = ps[(size_t)i].category.toUpperCase();
+        const float w = juce::jmin(t.getWidth() * 0.45f, (float)juce::GlyphArrangement::getStringWidthInt(g.getCurrentFont(), cat) + 10.0f);
+        g.drawText(cat, t.removeFromLeft(w), juce::Justification::centredLeft, true);
+    }
+    // chevron
+    const auto cv = t.removeFromRight(12);
+    juce::Path ch; ch.startNewSubPath(cv.getCentreX() - 3.5f, cv.getCentreY() - 1.5f); ch.lineTo(cv.getCentreX(), cv.getCentreY() + 2); ch.lineTo(cv.getCentreX() + 3.5f, cv.getCentreY() - 1.5f);
+    g.setColour(dim); g.strokePath(ch, juce::PathStrokeType(1.3f));
+    g.setFont(sans(13.0f, medium)); g.setColour(ink);
+    g.drawText(ps[(size_t)i].name + (modified ? " *" : ""), t.withTrimmedRight(6), juce::Justification::centredLeft, true);
+}
+void Editor::PresetBar::tick() {
+    const int c = proc.currentPreset(); const bool m = proc.presetModified();
+    if (c != shown || m != modified) { shown = c; modified = m; repaint(); }
+}
+void Editor::PresetBar::step(int d) {
+    const int n = (int)proc.presets().size();
+    proc.loadPreset(((proc.currentPreset() + d) % n + n) % n);
+    tick();
+}
+void Editor::PresetBar::mouseUp(const juce::MouseEvent& e) { if (nameArea.contains(e.getPosition())) openMenu(); }
+void Editor::PresetBar::openMenu() {
+    juce::PopupMenu menu; juce::StringArray cats; std::map<juce::String, juce::PopupMenu> subs;
+    const auto& ps = proc.presets();
+    for (int i = 0; i < (int)ps.size(); i++) {
+        if (ps[(size_t)i].category.isEmpty()) { menu.addItem(i + 1, ps[(size_t)i].name, true, i == proc.currentPreset()); menu.addSeparator(); continue; }
+        if (!cats.contains(ps[(size_t)i].category)) cats.add(ps[(size_t)i].category);
+        subs[ps[(size_t)i].category].addItem(i + 1, ps[(size_t)i].name, true, i == proc.currentPreset());
+    }
+    for (auto& c : cats) {
+        bool has = false; for (int i = 0; i < (int)ps.size(); i++) has |= ps[(size_t)i].category == c && i == proc.currentPreset();
+        menu.addSubMenu(c, subs[c], true, nullptr, has);
+    }
+    juce::Component::SafePointer<PresetBar> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMinimumWidth(getWidth()), [safe](int r) {
+        if (safe && r > 0) { safe->proc.loadPreset(r - 1); safe->tick(); }
+    });
+}
 
 // ================================================================ displays
 void FreqAxis::drawGrid(juce::Graphics& g, juce::Rectangle<float> r, bool labels) const {

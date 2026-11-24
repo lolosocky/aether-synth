@@ -3,6 +3,7 @@
 #include "../dsp/Eq.h"
 
 namespace {
+#include "Presets.inc"
 using namespace lgn;
 using station::ink; using station::dim; using station::faint; using station::hairline;
 
@@ -15,7 +16,7 @@ juce::String pid(int b, const char* what) { return juce::String(kPre[b]) + "_" +
 
 class EqProcessor : public Processor {
 public:
-    EqProcessor() : Processor("LGNEQ", layout()) {}
+    EqProcessor() : Processor("LGNEQ", layout()) { setPresets(factoryPresets(), presetKeep()); }
     static param::Layout layout() {
         param::Layout l;
         for (int b = 0; b < EqDsp::kBands; b++) {

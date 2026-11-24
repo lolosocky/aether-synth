@@ -200,7 +200,9 @@ void Look::drawButtonBackground(juce::Graphics& g, juce::Button& b, const juce::
     if (led) {
         if (on) {
             g.setColour(graphite); g.fillRoundedRectangle(r, rad);
-            drawDot(g, { r.getX() + 12.0f, r.getCentreY() }, 2.5f, true, accent);
+            // narrow tabs carry the dot under the label; wide ones carry it on the left
+            if (r.getWidth() < 72) drawDot(g, { r.getCentreX(), r.getBottom() - 6.0f }, 2.0f, true, accent);
+            else drawDot(g, { r.getX() + 10.0f, r.getCentreY() }, 2.5f, true, accent);
         } else {
             if (over) { g.setColour(juce::Colour(0x0a1a2030)); g.fillRoundedRectangle(r, rad); }
         }
@@ -221,7 +223,10 @@ void Look::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool, bool) {
     const bool led = (bool)b.getProperties().getWithDefault("led", false), on = b.getToggleState();
     const bool accentTone = b.getProperties().getWithDefault("tone", "").toString() == "accent";
     auto r = b.getLocalBounds().reduced(6, 2);
-    if (led && on) r = r.withTrimmedLeft(10);
+    if (led && on) {
+        if (b.getWidth() < 72) r = r.withTrimmedBottom(6);
+        else r = r.withTrimmedLeft(14);
+    }
     g.setFont(getTextButtonFont(b, b.getHeight()));
     juce::Colour c = led ? (on ? module : dim) : (accentTone ? module : ink);
     if (!b.isEnabled()) c = faint;

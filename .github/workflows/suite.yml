@@ -1,0 +1,101 @@
+name: Build LGN mixing suite
+
+on:
+  push:
+    branches: [main]
+    paths: [suite/**, shared/**, .github/workflows/suite.yml]
+  workflow_dispatch:
+
+env:
+  PLUGINS: LGN_EQ LGN_Compressor LGN_DeEsser LGN_Saturator LGN_Reverb LGN_Delay LGN_Limiter LGN_Gravity
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: DSP tests
+        run: |
+          g++ -std=c++17 -O2 -Isuite/dsp suite/tests/dsp_test.cpp -o dsp_test
+          ./dsp_test
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure
+        run: cmake -S suite -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+      - name: Build VST3 + AU (universal)
+        run: |
+          targets=""
+          for p in $PLUGINS; do targets="$targets --target ${p}_VST3 --target ${p}_AU"; done
+          cmake --build build --config Release $targets -- -quiet
+      - name: Ad-hoc sign and package
+        run: |
+          mkdir -p dist
+          for p in $PLUGINS; do
+            cp -R build/${p}_artefacts/Release/VST3/*.vst3 dist/
+            cp -R build/${p}_artefacts/Release/AU/*.component dist/
+          done
+          for b in dist/*.vst3 dist/*.component; do codesign --force --deep --sign - "$b"; done
+          ls dist
+          cp suite/packaging/INSTALL-mac.txt dist/
+          cp suite/packaging/install-mac.command dist/ && chmod +x dist/install-mac.command
+          cd dist && ditto -c -k --keepParent . ../LGN-Suite-mac.zip
+      - name: Validate AUs
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R dist/*.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          for c in LgEq LgCp LgDs LgSt LgRv LgDl LgLm LgGv; do auval -v aufx $c Lgnx | tail -3; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LGN-Suite-mac
+          path: LGN-Suite-mac.zip
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure
+        run: cmake -S suite -B build -A x64
+      - name: Build VST3
+        shell: pwsh
+        run: |
+          $targets = $env:PLUGINS.Split(' ') | ForEach-Object { "--target"; "$($_)_VST3" }
+          cmake --build build --config Release @targets
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          foreach ($p in $env:PLUGINS.Split(' ')) { Copy-Item -Recurse "build/$($p)_artefacts/Release/VST3/*.vst3" dist/ }
+          Copy-Item suite/packaging/INSTALL-windows.txt dist/
+          Get-ChildItem dist
+          Compress-Archive -Path dist/* -DestinationPath LGN-Suite-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LGN-Suite-windows
+          path: LGN-Suite-windows.zip
+
+  release:
+    needs: [macos, windows]
+    if: always() && (needs.macos.result == 'success' || needs.windows.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Publish latest suite build
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: suite-latest
+          name: LGN Mixing Suite (latest build)
+          prerelease: true
+          make_latest: false
+          body: "Automatic build from ${{ github.sha }}. LGN-Suite-mac.zip: all eight plugins as VST3 + AU for Mac. LGN-Suite-windows.zip: VST3 for Windows."
+          files: out/**/*.zip

@@ -47,6 +47,14 @@ struct Svf {
         a1 = 1.0 / (1.0 + g * (g + k)); a2 = g * a1; a3 = g * a2;
         gg = g; kk = k;
     }
+    // Core step returning the band-pass (v1) and low-pass (v2) states, for callers that mix their own outputs.
+    void tick(double v0, double& v1o, double& v2o) {
+        const double v3 = v0 - ic2;
+        const double v1 = a1 * ic1 + a2 * v3;
+        const double v2 = ic2 + a2 * ic1 + a3 * v3;
+        ic1 = 2 * v1 - ic1; ic2 = 2 * v2 - ic2;
+        v1o = v1; v2o = v2;
+    }
     double process(double v0) {
         const double v3 = v0 - ic2;
         const double v1 = a1 * ic1 + a2 * v3;

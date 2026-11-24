@@ -61,7 +61,14 @@ function(lgn_plugin target code product bundle categories source)
   set(LGN_PLUGINS ${LGN_PLUGINS} ${target} PARENT_SCOPE)
 endfunction()
 
-lgn_plugin(LGN_EQ        LgEq "LGN EQ"         eq        "Fx|EQ"          eq/EqPlugin.cpp)
+lgn_plugin(LGN_EQ         LgEq "LGN EQ"         eq        "Fx|EQ"          eq/EqPlugin.cpp)
+lgn_plugin(LGN_Compressor LgCp "LGN Compressor" comp      "Fx|Dynamics"    comp/CompPlugin.cpp)
+lgn_plugin(LGN_DeEsser    LgDs "LGN De-Esser"   deesser   "Fx|Dynamics"    deess/DeEssPlugin.cpp)
+lgn_plugin(LGN_Saturator  LgSt "LGN Saturator"  saturator "Fx|Distortion"  saturate/SatPlugin.cpp)
+lgn_plugin(LGN_Reverb     LgRv "LGN Reverb"     reverb    "Fx|Reverb"      verb/VerbPlugin.cpp)
+lgn_plugin(LGN_Delay      LgDl "LGN Delay"      delay     "Fx|Delay"       delay/DelayPlugin.cpp)
+lgn_plugin(LGN_Limiter    LgLm "LGN Limiter"    limiter   "Fx|Dynamics"    limit/LimitPlugin.cpp)
+lgn_plugin(LGN_Gravity    LgGv "LGN Gravity"    gravity   "Fx|Pitch Shift" gravity/GravityPlugin.cpp)
 
 # DSP unit tests (no JUCE).
 add_executable(lgn_dsp_test EXCLUDE_FROM_ALL tests/dsp_test.cpp)

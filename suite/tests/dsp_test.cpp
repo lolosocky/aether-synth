@@ -1,5 +1,12 @@
 // DSP tests for the LGN mixing suite (no JUCE). Each test prints one line; the program fails if any check fails.
 #include "Eq.h"
+#include "Comp.h"
+#include "DeEss.h"
+#include "Saturate.h"
+#include "Reverb.h"
+#include "Delay.h"
+#include "Limit.h"
+#include "Gravity.h"
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -70,8 +77,255 @@ static void testEq() {
     }
 }
 
+// Level (RMS dB) of the second half of a processed sine.
+static double toneOut(const std::function<void(float* const*, int)>& proc, double f, double amp, double sr, double seconds, double* inDb = nullptr) {
+    const int n = (int)(sr * seconds), blk = 256; std::vector<float> L((size_t)n), R((size_t)n);
+    for (int i = 0; i < n; i++) L[(size_t)i] = R[(size_t)i] = (float)(amp * std::sin(2 * kPi * f * i / sr));
+    for (int o = 0; o < n; o += blk) { float* ch[2] = { L.data() + o, R.data() + o }; proc(ch, std::min(blk, n - o)); }
+    double so = 0; for (int i = n / 2; i < n; i++) so += (double)L[(size_t)i] * L[(size_t)i];
+    if (inDb) *inDb = gainToDb(amp / std::sqrt(2.0));
+    return 10 * std::log10(so / (n - n / 2) + 1e-30);
+}
+
+static void testComp() {
+    std::printf("Compressor\n");
+    const double sr = 48000;
+    expect(std::abs(CompDsp::curve(-30, -18, 4, 0) + 30) < 1e-9, "below threshold is untouched");
+    expect(std::abs(CompDsp::curve(-6, -18, 4, 0) - (-15)) < 1e-9, "4:1 above threshold: -6 dB in gives -15 dB out");
+    expect(std::abs(CompDsp::curve(-18, -18, 4, 6) - (-18 + (0.25 - 1) * 9.0 / 12.0)) < 1e-9, "soft knee is continuous at threshold");
+    for (int style = 0; style < 3; style++) {
+        CompDsp c; CompParams p; p.thresh = -20; p.ratio = 4; p.kneeDb = 0; p.attackMs = 5; p.releaseMs = 100; p.style = style; c.set(p); c.prepare(sr);
+        double in; const double out = toneOut([&](float* const* ch, int n) { c.process(ch, 2, n); }, 1000, 0.5, sr, 1.5, &in);
+        // a sine's peak is 3 dB above its RMS; the peak styles see the peak, Glue sees RMS x sqrt2 (= peak for a sine)
+        const double peakIn = gainToDb(0.5), want = CompDsp::curve(peakIn, -20, 4, 0) - peakIn;
+        const double got = out - in;
+        if (style == CompDsp::punch) expect(got < -3 && got > want - 3, "punch (feedback) compresses a loud tone: " + std::to_string(got) + " dB");
+        else expect(std::abs(got - want) < 0.8, std::string(style == 0 ? "clean" : "glue") + " gain matches the static curve (" + std::to_string(got) + " vs " + std::to_string(want) + " dB)");
+    }
+    {   // mix 0 is a perfect bypass
+        CompDsp c; CompParams p; p.thresh = -40; p.ratio = 20; p.mix = 0; c.set(p); c.prepare(sr);
+        double in; const double out = toneOut([&](float* const* ch, int n) { c.process(ch, 2, n); }, 440, 0.5, sr, 0.5, &in);
+        expect(std::abs(out - in) < 0.01, "mix at 0% passes the dry signal");
+    }
+    {   // release recovers: after a loud burst, quiet signal returns to unity
+        CompDsp c; CompParams p; p.thresh = -20; p.ratio = 8; p.releaseMs = 50; c.set(p); c.prepare(sr);
+        const int n = 48000; std::vector<float> L((size_t)n), R((size_t)n);
+        for (int i = 0; i < n; i++) { const double a = i < 12000 ? 0.8 : 0.02; L[(size_t)i] = R[(size_t)i] = (float)(a * std::sin(2 * kPi * 300 * i / sr)); }
+        for (int o = 0; o < n; o += 256) { float* ch[2] = { L.data() + o, R.data() + o }; c.process(ch, 2, std::min(256, n - o)); }
+        expect(c.reductionDb() < 0.1, "gain reduction releases after the burst (" + std::to_string(c.reductionDb()) + " dB left)");
+    }
+}
+
+static void testDeEss() {
+    std::printf("De-Esser\n");
+    const double sr = 48000;
+    auto run = [&](double f, double amp, int mode) {
+        DeEssDsp d; DeEssParams p; p.freq = 5000; p.thresh = -30; p.rangeDb = 10; p.mode = mode; d.set(p); d.prepare(sr);
+        double in; const double out = toneOut([&](float* const* ch, int n) { d.process(ch, 2, n); }, f, amp, sr, 1.0, &in);
+        return out - in;
+    };
+    expect(std::abs(run(500, 0.3, DeEssDsp::split)) < 0.3, "split mode leaves the body of the voice alone (500 Hz)");
+    const double s = run(8000, 0.3, DeEssDsp::split);
+    expect(s < -6 && s > -10.5, "split mode turns loud sibilance down, within range (" + std::to_string(s) + " dB)");
+    expect(std::abs(run(8000, 0.005, DeEssDsp::split)) < 0.3, "quiet sibilance under the threshold is untouched");
+    {   // split with no reduction reconstructs the input exactly
+        DeEssDsp d; DeEssParams p; p.thresh = 0; d.set(p); d.prepare(sr);
+        std::vector<float> L(4096), R(4096); std::mt19937 g(5); std::uniform_real_distribution<float> u(-0.2f, 0.2f);
+        for (int i = 0; i < 4096; i++) L[(size_t)i] = R[(size_t)i] = u(g);
+        auto L0 = L; float* ch[2] = { L.data(), R.data() }; d.process(ch, 2, 4096);
+        double md = 0; for (int i = 0; i < 4096; i++) md = std::max(md, (double)std::abs(L[(size_t)i] - L0[(size_t)i]));
+        expect(md < 1e-6, "split mode is transparent when nothing crosses the threshold");
+    }
+}
+
+static void testSat() {
+    std::printf("Saturator\n");
+    // harmonic signature of each mode: drive a sine and look at the 2nd and 3rd harmonics
+    const double sr = 48000, f0 = 1000;
+    for (int m = 0; m < SatDsp::numModes; m++) {
+        const int n = 4800; std::vector<double> y((size_t)n);
+        for (int i = 0; i < n; i++) y[(size_t)i] = SatDsp::shape(m, 2.0 * 0.5 * std::sin(2 * kPi * f0 * i / sr));
+        double mean = 0; for (double v : y) mean += v; mean /= n;
+        auto harmonic = [&](int k) { double re = 0, im = 0; for (int i = 0; i < n; i++) { re += (y[(size_t)i] - mean) * std::cos(2 * kPi * k * f0 * i / sr); im += (y[(size_t)i] - mean) * std::sin(2 * kPi * k * f0 * i / sr); } return std::sqrt(re * re + im * im) * 2 / n; };
+        const double h1 = harmonic(1), h2 = gainToDb(harmonic(2) / h1), h3 = gainToDb(harmonic(3) / h1);
+        const char* names[] = { "tape", "tube", "transistor", "fuzz" };
+        bool ok = std::isfinite(h2) && std::isfinite(h3);
+        if (m == SatDsp::tape) ok = ok && h2 < -60 && h3 > -40;      // odd only
+        if (m == SatDsp::tube || m == SatDsp::fuzz) ok = ok && h2 > -40;   // strong even
+        expect(ok, std::string(names[m]) + ": 2nd " + std::to_string((int)h2) + " dB, 3rd " + std::to_string((int)h3) + " dB");
+    }
+    {   // auto gain keeps loudness steady as drive rises
+        SatDsp s; s.buildAutoGain(); double worst = 0;
+        for (int m = 0; m < SatDsp::numModes; m++) for (double d : { 0.0, 12.0, 24.0, 36.0 }) {
+            double si = 0, so = 0;
+            for (int i = 0; i < 4800; i++) { const double x = 0.125 * std::sin(2 * kPi * i / 48.0); const double yv = SatDsp::shape(m, x * dbToGain(d)) * s.autoGain(m, d); si += x * x; so += yv * yv; }
+            worst = std::max(worst, std::abs(10 * std::log10(so / si)));
+        }
+        expect(worst < 1.0, "auto gain holds level within 1 dB across modes and drive (" + std::to_string(worst) + ")");
+    }
+}
+
+static void testVerb() {
+    std::printf("Reverb\n");
+    const double sr = 48000;
+    for (int c = 0; c < 4; c++) {
+        VerbDsp v; VerbParams p; p.character = c; p.decayS = 2.0; p.mix = 1.0; p.lowCutHz = 20; p.dampHz = 18000; p.preMs = 0; v.set(p); v.prepare(sr);
+        const int n = (int)(sr * 5); std::vector<float> L((size_t)n, 0.0f), R((size_t)n, 0.0f); L[100] = R[100] = 1.0f;
+        for (int o = 0; o < n; o += 256) { float* ch[2] = { L.data() + o, R.data() + o }; v.process(ch, 2, std::min(256, n - o)); }
+        // energy decay: compare 50 ms windows 0.5 s and 1.5 s after the impulse -> should fall ~30 dB per second for RT60 = 2 s
+        auto e = [&](double t) { double s2 = 0; const int a = (int)(t * sr); for (int i = a; i < a + 2400; i++) s2 += (double)L[(size_t)i] * L[(size_t)i] + (double)R[(size_t)i] * R[(size_t)i]; return 10 * std::log10(s2 + 1e-30); };
+        const double slope = e(0.5) - e(1.5);
+        bool finite = true; for (float x : L) finite = finite && std::isfinite(x);
+        const char* names[] = { "room", "plate", "hall", "space" };
+        expect(finite && slope > 22 && slope < 38, std::string(names[c]) + ": decays " + std::to_string(slope) + " dB per second (RT60 2 s wants 30)");
+    }
+    {   // freeze holds the tail
+        VerbDsp v; VerbParams p; p.mix = 1; p.decayS = 1; v.set(p); v.prepare(sr);
+        const int n = (int)(sr * 3); std::vector<float> L((size_t)n), R((size_t)n);
+        std::mt19937 g(2); std::uniform_real_distribution<float> u(-0.3f, 0.3f);
+        for (int i = 0; i < 24000; i++) L[(size_t)i] = R[(size_t)i] = u(g);
+        for (int o = 0; o < n; o += 256) { if (o >= 24000 && !p.freeze) { p.freeze = true; v.set(p); } float* ch[2] = { L.data() + o, R.data() + o }; v.process(ch, 2, std::min(256, n - o)); }
+        auto e = [&](double t) { double s2 = 0; const int a = (int)(t * sr); for (int i = a; i < a + 4800; i++) s2 += (double)L[(size_t)i] * L[(size_t)i]; return 10 * std::log10(s2 + 1e-30); };
+        expect(std::abs(e(1.5) - e(2.8)) < 3, "freeze holds the tail steady (" + std::to_string(e(1.5) - e(2.8)) + " dB change)");
+    }
+}
+
+static void testDelay() {
+    std::printf("Delay\n");
+    const double sr = 48000;
+    {
+        DelayDsp d; DelayParams p; p.timeMs = 250; p.feedback = 0.5; p.mix = 1; p.lowCutHz = 20; p.highCutHz = 20000; p.warmth = 0; p.wow = 0; d.set(p); d.prepare(sr);
+        const int n = (int)sr; std::vector<float> L((size_t)n, 0.0f), R((size_t)n, 0.0f);
+        L[0] = R[0] = 0.5f;
+        std::vector<float> L2((size_t)n, 0.0f), R2((size_t)n, 0.0f);   // a 1 kHz tone burst for level checks
+        for (int i = 0; i < 2400; i++) L2[(size_t)i] = R2[(size_t)i] = (float)(0.1 * std::sin(2 * kPi * 1000 * i / sr));
+        for (int o = 0; o < n; o += 128) { float* ch[2] = { L.data() + o, R.data() + o }; d.process(ch, 2, std::min(128, n - o)); }
+        int pk = 0; for (int i = 1; i < 18000; i++) if (std::abs(L[(size_t)i]) > std::abs(L[(size_t)pk])) pk = i;
+        expect(std::abs(pk - 12000) <= 2, "first echo lands at 250 ms (sample " + std::to_string(pk) + ")");
+        DelayDsp d2; d2.set(p); d2.prepare(sr);
+        for (int o = 0; o < n; o += 128) { float* ch[2] = { L2.data() + o, R2.data() + o }; d2.process(ch, 2, std::min(128, n - o)); }
+        auto rms = [&](int a) { double s2 = 0; for (int i = a + 400; i < a + 2000; i++) s2 += (double)L2[(size_t)i] * L2[(size_t)i]; return s2; };
+        const double ratio = 10 * std::log10(rms(24000) / rms(12000));
+        expect(std::abs(ratio - gainToDb(0.49)) < 0.5, "each repeat is quieter by the feedback amount (" + std::to_string(ratio) + " dB, want " + std::to_string(gainToDb(0.49)) + ")");
+    }
+    {   // full feedback with warmth stays bounded
+        DelayDsp d; DelayParams p; p.timeMs = 30; p.feedback = 1.0; p.mix = 1; p.warmth = 1; d.set(p); d.prepare(sr);
+        const int n = (int)(sr * 4); std::vector<float> L((size_t)n), R((size_t)n);
+        std::mt19937 g(4); std::uniform_real_distribution<float> u(-0.9f, 0.9f);
+        for (int i = 0; i < n; i++) L[(size_t)i] = R[(size_t)i] = i < 48000 ? u(g) : 0.0f;
+        for (int o = 0; o < n; o += 256) { float* ch[2] = { L.data() + o, R.data() + o }; d.process(ch, 2, std::min(256, n - o)); }
+        float pk = 0; bool fin = true; for (float x : L) { pk = std::max(pk, std::abs(x)); fin = fin && std::isfinite(x); }
+        expect(fin && pk < 4.0f, "maximum feedback stays bounded (peak " + std::to_string(pk) + ")");
+    }
+}
+
+static void testLimit() {
+    std::printf("Limiter\n");
+    const double sr = 48000;
+    for (bool tp : { false, true }) {
+        LimitDsp l; LimitParams p; p.inputDb = 12; p.ceilingDb = -1.0; p.truePeak = tp; l.set(p); l.prepare(sr);
+        const int n = (int)(sr * 3); std::vector<float> L((size_t)n), R((size_t)n);
+        std::mt19937 g(9); std::normal_distribution<float> u(0, 0.3f);
+        // loud noise (band-limited at 20 kHz, like real program material) plus drum hits, driven 12 dB into the limiter
+        Svf f1[2], f2[2]; for (int c = 0; c < 2; c++) { f1[c].set(Svf::lowpass, sr, 20000, 0.54); f2[c].set(Svf::lowpass, sr, 20000, 1.31); }
+        for (int i = 0; i < n; i++) {
+            const double drum = std::exp(-std::fmod(i / sr, 0.25) * 20) * std::sin(2 * kPi * 60 * i / sr);
+            L[(size_t)i] = (float)(f2[0].process(f1[0].process(u(g) * 0.5)) + drum); R[(size_t)i] = (float)(f2[1].process(f1[1].process(u(g) * 0.5)) - drum * 0.8);
+        }
+        for (int o = 0; o < n; o += 300) { float* ch[2] = { L.data() + o, R.data() + o }; l.process(ch, 2, std::min(300, n - o)); }
+        double sp = 0; for (int i = 0; i < n; i++) sp = std::max({ sp, (double)std::abs(L[(size_t)i]), (double)std::abs(R[(size_t)i]) });
+        // true peak: 8x sinc-interpolate the output and find the largest value
+        double tpk = 0;
+        for (int i = 64; i < n - 64; i += 1) for (int ph = 1; ph < 8; ph++) {
+            double s2 = 0; for (int k = -32; k <= 32; k++) { const double tt = k - ph / 8.0; const double w = 0.5 + 0.5 * std::cos(kPi * tt / 33); s2 += L[(size_t)(i + k)] * std::sin(kPi * tt) / (kPi * tt) * w; }
+            tpk = std::max(tpk, std::abs(s2));
+        }
+        expect(gainToDb(sp) <= -1.0 + 1e-4, std::string(tp ? "true-peak" : "sample-peak") + " mode: sample peaks stay under the ceiling (" + std::to_string(gainToDb(sp)) + " dBFS)");
+        if (tp) expect(gainToDb(tpk) <= -0.9, "true-peak mode: intersample peaks stay under the ceiling (" + std::to_string(gainToDb(tpk)) + " dBTP)");
+        else std::printf("       sample-peak mode intersample peak: %.2f dBTP\n", gainToDb(tpk));
+    }
+    {   // under the ceiling: an exact delay
+        LimitDsp l; LimitParams p; p.inputDb = 0; p.ceilingDb = 0; p.truePeak = false; l.set(p); l.prepare(sr);
+        std::vector<float> L(8192), R(8192); std::mt19937 g(1); std::uniform_real_distribution<float> u(-0.3f, 0.3f);
+        for (int i = 0; i < 8192; i++) L[(size_t)i] = R[(size_t)i] = u(g);
+        auto L0 = L; float* ch[2] = { L.data(), R.data() }; l.process(ch, 2, 8192);
+        double md = 0; const int D = l.latency(); for (int i = D; i < 8192; i++) md = std::max(md, (double)std::abs(L[(size_t)i] - L0[(size_t)(i - D)]));
+        expect(md < 1e-6, "below the ceiling it is a clean delay of " + std::to_string(D) + " samples (latency reported correctly)");
+    }
+}
+
+// Frequency of the strongest component in x (Hz), with parabolic interpolation.
+static double dominantHz(const std::vector<float>& x, int start, int len, double sr) {
+    Fft f(15); const int n = 1 << 15; std::vector<std::complex<double>> b((size_t)n);
+    for (int i = 0; i < n; i++) { const double w = i < len ? 0.5 - 0.5 * std::cos(2 * kPi * i / len) : 0; b[(size_t)i] = { i < len ? x[(size_t)(start + i)] * w : 0.0, 0.0 }; }
+    f.transform(b.data(), false);
+    int best = 1; for (int k = 2; k < n / 2 - 1; k++) if (std::abs(b[(size_t)k]) > std::abs(b[(size_t)best])) best = k;
+    const double a = std::log(std::abs(b[(size_t)best - 1]) + 1e-30), c = std::log(std::abs(b[(size_t)best]) + 1e-30), d = std::log(std::abs(b[(size_t)best + 1]) + 1e-30);
+    return (best + 0.5 * (a - d) / (a - 2 * c + d)) * sr / n;
+}
+
+static void testGravity() {
+    std::printf("Gravity\n");
+    const double sr = 48000;
+    {   // pull and mass at zero: an exact delay
+        GravityDsp g; GravityParams p; p.pull = 0; p.mass = 0; g.set(p); g.prepare(sr);
+        const int n = 48000; std::vector<float> L((size_t)n), R((size_t)n); std::mt19937 r(3); std::uniform_real_distribution<float> u(-0.3f, 0.3f);
+        for (int i = 0; i < n; i++) { L[(size_t)i] = u(r) + (float)(0.2 * std::sin(2 * kPi * 330 * i / sr)); R[(size_t)i] = u(r); }
+        auto L0 = L; for (int o = 0; o < n; o += 512) { float* ch[2] = { L.data() + o, R.data() + o }; g.process(ch, 2, std::min(512, n - o)); }
+        const int D = g.latency(); double md = 0; for (int i = D + 4096; i < n; i++) md = std::max(md, (double)std::abs(L[(size_t)i] - L0[(size_t)(i - D)]));
+        expect(md < 1e-4, "with no pull it is transparent, a delay of " + std::to_string(D) + " samples (max diff " + std::to_string(md) + ")");
+    }
+    auto pullTone = [&](double inHz, double pull, int key, int scale, double drift) {
+        GravityDsp g; GravityParams p; p.pull = pull; p.mass = 0; p.key = key; p.scale = scale; p.driftMs = drift; p.floorHz = 100; g.set(p); g.prepare(sr);
+        const int n = 96000; std::vector<float> L((size_t)n), R((size_t)n);
+        for (int i = 0; i < n; i++) L[(size_t)i] = R[(size_t)i] = (float)(0.3 * std::sin(2 * kPi * inHz * i / sr));
+        for (int o = 0; o < n; o += 256) { float* ch[2] = { L.data() + o, R.data() + o }; g.process(ch, 2, std::min(256, n - o)); }
+        return dominantHz(L, 48000, 32768, sr);
+    };
+    {
+        const double f = pullTone(452, 1.0, 9, 1, 0);   // A minor: 452 Hz falls into A (440)
+        expect(std::abs(f - 440) < 1.0, "full pull lands a 452 Hz tone on A 440 (" + std::to_string(f) + " Hz)");
+        const double h = pullTone(452, 0.5, 9, 1, 0);
+        const double want = 452 * std::sqrt(440.0 / 452.0);
+        expect(std::abs(h - want) < 1.0, "half pull goes halfway, in pitch (" + std::to_string(h) + " Hz, want " + std::to_string(want) + ")");
+        const double c = pullTone(1000, 1.0, 0, 0, 30);  // C major: 1000 Hz -> B5 987.8 Hz
+        expect(std::abs(c - 987.77) < 1.5, "1 kHz in C major settles on B (" + std::to_string(c) + " Hz)");
+    }
+    {   // mass gathers noise into the scale: energy within 25 cents of a note goes up
+        auto inScaleShare = [&](double mass) {
+            GravityDsp g; GravityParams p; p.pull = 0; p.mass = mass; p.key = 0; p.scale = 9; p.floorHz = 200; g.set(p); g.prepare(sr);
+            const int n = 96000; std::vector<float> L((size_t)n), R((size_t)n); std::mt19937 r(8); std::uniform_real_distribution<float> u(-0.3f, 0.3f);
+            for (int i = 0; i < n; i++) L[(size_t)i] = R[(size_t)i] = u(r);
+            for (int o = 0; o < n; o += 512) { float* ch[2] = { L.data() + o, R.data() + o }; g.process(ch, 2, std::min(512, n - o)); }
+            Fft f(15); const int m = 1 << 15; std::vector<std::complex<double>> b((size_t)m);
+            for (int i = 0; i < m; i++) b[(size_t)i] = { L[(size_t)(48000 + i)] * (0.5 - 0.5 * std::cos(2 * kPi * i / m)), 0.0 };
+            f.transform(b.data(), false);
+            double in = 0, all = 0;
+            for (int k = (int)(400.0 * m / sr); k < (int)(8000.0 * m / sr); k++) {
+                const double hz = k * sr / m, e = std::norm(b[(size_t)k]);
+                all += e; if (std::abs(1200 * std::log2(hz / GravityDsp::nearestNote(hz, 0, 9))) < 25) in += e;
+            }
+            return in / all;
+        };
+        const double a = inScaleShare(0), b = inScaleShare(1);
+        expect(b > a * 1.8, "mass gathers noise into the octave wells (" + std::to_string(a * 100) + "% -> " + std::to_string(b * 100) + "% of energy near notes)");
+    }
+    {   // stays finite and bounded on wild input and settings
+        GravityDsp g; GravityParams p; g.set(p); g.prepare(sr);
+        const int n = 96000; std::vector<float> L((size_t)n), R((size_t)n); std::mt19937 r(5); std::uniform_real_distribution<float> u(-1, 1);
+        for (int i = 0; i < n; i++) { L[(size_t)i] = u(r); R[(size_t)i] = (i / 4000) % 2 ? 0.0f : u(r); }
+        float pk = 0; bool fin = true;
+        for (int o = 0; o < n; o += 333) {
+            p.pull = (o / 3330 % 5) / 4.0; p.mass = (o / 7000 % 3) / 2.0; p.key = o / 9000 % 12; p.scale = o / 11000 % 11; p.driftMs = (o / 5000 % 4) * 200; g.set(p);
+            float* ch[2] = { L.data() + o, R.data() + o }; g.process(ch, 2, std::min(333, n - o));
+        }
+        for (int i = 0; i < n; i++) { fin = fin && std::isfinite(L[(size_t)i]) && std::isfinite(R[(size_t)i]); pk = std::max(pk, std::abs(L[(size_t)i])); }
+        expect(fin && pk < 3, "stays finite and bounded with settings changing under it (peak " + std::to_string(pk) + ")");
+    }
+}
+
 int main() {
-    testEq();
+    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity();
     std::printf(fails ? "FAILED (%d)\n" : "ALL PASS\n", fails);
     return fails ? 1 : 0;
 }

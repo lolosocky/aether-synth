@@ -1,0 +1,12 @@
+LGN MIXING SUITE FOR MAC (VST3 + AU)
+
+EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter and Gravity.
+
+1. Double-click install-mac.command. If macOS blocks it, right-click it > Open > Open.
+   (Or copy the .vst3 files to /Library/Audio/Plug-Ins/VST3/ and the .component files to
+   /Library/Audio/Plug-Ins/Components/ yourself.)
+2. In FL Studio: Options > Manage plugins > Find more plugins.
+3. The plugins appear under Effects as "LGN EQ", "LGN Compressor" and so on.
+
+Presets: click the preset name at the top of any plugin for the factory presets, or use the
+< > arrows to step through them. They also appear in your DAW's own preset menu.

@@ -1,0 +1,12 @@
+LGN MIXING SUITE FOR WINDOWS (VST3)
+
+EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter and Gravity.
+
+1. Copy every .vst3 folder to  C:\Program Files\Common Files\VST3\
+2. In FL Studio: Options > Manage plugins > Find more plugins.
+3. The plugins appear under Effects as "LGN EQ", "LGN Compressor" and so on.
+
+Presets: click the preset name at the top of any plugin for the factory presets, or use the
+< > arrows to step through them. They also appear in your DAW's own preset menu.
+
+If Windows SmartScreen warns about them, choose "More info" > "Run anyway" (the plugins aren't code-signed).

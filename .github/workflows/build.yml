@@ -3,6 +3,7 @@ name: Build plugin
 on:
   push:
     branches: [main]
+    paths-ignore: [suite/**]
   workflow_dispatch:
 
 jobs:

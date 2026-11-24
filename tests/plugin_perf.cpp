@@ -55,6 +55,11 @@ int main(int argc, char** argv) {
             p.processBlock(buf, midi);
             const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / (B / SR);
             blocks.push_back(dt); total += dt;
+            if (const char* dump = std::getenv("AETHER_DUMP")) {   // raw float32 stereo per preset, for comparing builds
+                static FILE* f = nullptr; static int which = -1;
+                if (which != i) { if (f) std::fclose(f); f = std::fopen((std::string(dump) + "_" + std::to_string(i) + ".f32").c_str(), "wb"); which = i; }
+                for (int k = 0; k < B; k++) { const float fr[2] = { buf.getSample(0, k), buf.getSample(1, k) }; std::fwrite(fr, 4, 2, f); }
+            }
         }
         std::sort(blocks.begin(), blocks.end());
         const double avg = total / blocks.size(), p99 = blocks[(size_t)(blocks.size() * 0.99)], worst = blocks.back();

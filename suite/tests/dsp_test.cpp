@@ -9,6 +9,9 @@
 #include "Gravity.h"
 #include "Duck.h"
 #include "Guitar.h"
+#include "Distance.h"
+#include "Era.h"
+#include "Swing.h"
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -452,8 +455,99 @@ static void testGuitar() {
     }
 }
 
+static double toneLevelDb(std::vector<float>& x, size_t from, size_t len, double f, double sr) {
+    double re = 0, im = 0;
+    for (size_t i = 0; i < len; i++) { const double w = 0.5 - 0.5 * std::cos(2 * kPi * i / len); re += x[from + i] * w * std::cos(2 * kPi * f * i / sr); im += x[from + i] * w * std::sin(2 * kPi * f * i / sr); }
+    return 20 * std::log10(std::sqrt(re * re + im * im) / len * 4 + 1e-12);
+}
+
+static void testDistance() {
+    std::printf("Distance\n");
+    const double sr = 48000;
+    auto run = [&](DistanceParams p, double f, double& lrDb) {
+        DistanceDsp d; d.set(p); d.prepare(sr); const int n = (int)sr; std::vector<float> L((size_t)n), R((size_t)n);
+        for (int i = 0; i < n; i++) L[(size_t)i] = R[(size_t)i] = (float)(0.3 * std::sin(2 * kPi * f * i / sr));
+        for (int o = 0; o < n; o += 256) { float* c[2] = { L.data() + o, R.data() + o }; d.process(c, 2, std::min(256, n - o)); }
+        double sl = 0, sr2 = 0; for (int i = n / 2; i < n; i++) { sl += L[(size_t)i] * L[(size_t)i]; sr2 += R[(size_t)i] * R[(size_t)i]; }
+        lrDb = 10 * std::log10(sl / sr2); return 10 * std::log10((sl + sr2) / 2 / (n / 2)) - 20 * std::log10(0.3 / std::sqrt(2));
+    };
+    double lr;
+    DistanceParams p; p.space = DistanceDsp::field; p.keepLevel = 0;
+    p.distance = DistanceDsp::knobFor(4); const double a4 = run(p, 1000, lr);
+    p.distance = DistanceDsp::knobFor(16); const double a16 = run(p, 1000, lr);
+    expect(std::abs((a4 - a16) - 12) < 1.5, "open field: 4x the distance is 12 dB quieter (" + std::to_string(a4 - a16) + " dB)");
+    p.distance = DistanceDsp::knobFor(64); const double lo = run(p, 1000, lr), hi = run(p, 8000, lr);
+    expect(lo - hi > 8, "far away, the air takes the highs (8 kHz " + std::to_string(lo - hi) + " dB under 1 kHz at 64 m)");
+    p.distance = DistanceDsp::knobFor(0.15); expect(run(p, 1000, lr) < 4.5, "very close is capped at about +4 dB");
+    DistanceParams q; q.space = DistanceDsp::field; q.angleDeg = 60; run(q, 1000, lr);
+    expect(lr < -5, "a source to the right is louder on the right (" + std::to_string(lr) + " dB L-R)");
+    DistanceParams h; h.space = DistanceDsp::hall; h.keepLevel = 0; h.distance = DistanceDsp::knobFor(30);
+    const double hall30 = run(h, 1000, lr); h.space = DistanceDsp::field; const double field30 = run(h, 1000, lr);
+    expect(hall30 > field30 + 6, "indoors the room keeps far sounds louder than in an open field");
+}
+
+static void testEra() {
+    std::printf("Era\n");
+    const double sr = 48000;
+    auto peakAt = [&](EraParams p) {
+        EraDsp e; e.set(p); e.prepare(sr); const int n = 8192; std::vector<float> L((size_t)n, 0), R((size_t)n, 0); L[1000] = R[1000] = 0.5f;
+        for (int o = 0; o < n; o += 256) { float* c[2] = { L.data() + o, R.data() + o }; e.process(c, 2, 256); }
+        int best = 0; float bv = 0; for (int i = 0; i < n; i++) if (std::abs(L[(size_t)i]) > bv) { bv = std::abs(L[(size_t)i]); best = i; }
+        return best - 1000;
+    };
+    EraParams a; a.age = 0; EraParams b; b.era = 9; b.age = 0.01; b.noise = 0;
+    expect(peakAt(a) == EraDsp::latency() && peakAt(b) == EraDsp::latency(), "dry and processed paths both sit exactly at the reported latency (mix lines up)");
+    bool ok = true; double worst = 0;
+    for (int e = 0; e < EraDsp::kEras; e++) {
+        EraParams q; q.era = e; q.age = 1; q.grit = 2; q.wobble = 2; q.noise = 2; EraDsp d; d.set(q); d.prepare(sr);
+        const int n = (int)(sr * 2); std::vector<float> L((size_t)n), R((size_t)n);
+        for (int i = 0; i < n; i++) L[(size_t)i] = R[(size_t)i] = (float)(0.5 * std::sin(2 * kPi * 220 * i / sr));
+        for (int o = 0; o < n; o += 256) { float* c[2] = { L.data() + o, R.data() + o }; d.process(c, 2, 256); }
+        for (float v : L) { ok = ok && std::isfinite(v); worst = std::max(worst, (double)std::abs(v)); }
+    }
+    expect(ok && worst < 2, "every era stays finite and bounded at maximum age, grit, wobble and noise (peak " + std::to_string(worst) + ")");
+    EraParams sp; sp.era = 4; sp.age = 1; sp.noise = 0; EraDsp d; d.set(sp); d.prepare(sr);
+    expect(std::abs(d.effectiveRate() - 26040) < 1 && std::abs(d.effectiveBits() - 12) < 0.01, "SP-1200 at full age runs at 26.04 kHz and 12 bits");
+}
+
+static void testSwing() {
+    std::printf("Swing\n");
+    const double sr = 48000, bpm = 120, sps = 0.25 * 60 / bpm * sr;
+    SwingParams p; p.grid = 1; p.swingPct = 66.6667; SwingDsp s; s.set(p); s.prepare(sr);
+    const int n = (int)(sps * 32); std::vector<float> L((size_t)n, 0), R((size_t)n, 0);
+    for (int k = 0; k < 32; k++) { const int st = (int)(k * sps); for (int i = 0; i < 1500; i++) L[(size_t)(st + i)] = R[(size_t)(st + i)] = (float)(0.8 * std::exp(-i / 300.0) * std::sin(2 * kPi * 180 * i / sr)); }
+    const auto in = L;
+    for (int o = 0; o < n; o += 256) { float* c[2] = { L.data() + o, R.data() + o }; s.process(c, 2, std::min(256, n - o), o / sps * 0.25, bpm, true); }
+    std::vector<int> on;
+    for (int i = 1; i < n; i++) if (std::abs(L[(size_t)i]) > 0.05) { bool quiet = true; for (int j = std::max(0, i - 200); j < i; j++) if (std::abs(L[(size_t)j]) > 0.05) { quiet = false; break; } if (quiet) on.push_back(i); }
+    double worst = 0; for (size_t k = 0; k < on.size() && k < 30; k++) worst = std::max(worst, std::abs(on[k] - (k * sps + s.latency() + (k % 2 ? sps / 3 : 0))));
+    expect(on.size() == 32 && worst < 8, "66% swing: every hit lands on its swung spot (worst " + std::to_string(worst / sr * 1000) + " ms)");
+    const int o5 = (int)(5 * sps + s.latency() + sps / 3); double err = 0;
+    for (int i = 0; i < 1000; i++) err = std::max(err, (double)std::abs(L[(size_t)(o5 + i)] - in[(size_t)(int)(5 * sps) + (size_t)i]));
+    expect(err < 0.001, "the hit itself comes through untouched (the cut happens before it)");
+    double step = 0; for (int i = 1; i < n; i++) step = std::max(step, (double)std::abs(L[(size_t)i] - L[(size_t)i - 1]));
+    expect(step < 0.03, "no clicks where the audio is cut and moved");
+}
+
+static void testMood() {
+    std::printf("Mood\n");
+    const double sr = 48000; const int n = (int)(sr * 3); std::vector<float> L((size_t)n), R((size_t)n);
+    const double notes[3] = { 261.63, 329.63, 392.0 };   // C major
+    for (int i = 0; i < n; i++) { double v = 0; for (double f : notes) for (int h = 1; h <= 8; h++) v += 0.06 / h * std::sin(2 * kPi * f * h * i / sr); L[(size_t)i] = R[(size_t)i] = (float)v; }
+    auto in = L;
+    GravityParams p; p.moodMode = true; p.fine = true; p.key = 0; p.pull = 1; p.mass = 0; p.floorHz = 40; p.driftMs = 20; p.noteShift[4] = -1;
+    GravityDsp g; g.set(p); g.prepare(sr);
+    for (int o = 0; o < n; o += 512) { float* c[2] = { L.data() + o, R.data() + o }; g.process(c, 2, std::min(512, n - o)); }
+    const size_t a = (size_t)(sr * 1.5), len = (size_t)sr, ai = a - (size_t)g.latency();
+    auto at = [&](std::vector<float>& x, size_t from, double f) { return toneLevelDb(x, from, len, f, sr); };
+    expect(at(L, a, 329.63) < at(in, ai, 329.63) - 40 && std::abs(at(L, a, 311.13) - at(in, ai, 329.63)) < 3, "C major to minor: E moves to Eb");
+    expect(at(L, a, 622.25) > at(in, ai, 659.26) - 3, "and E's overtones move with it (its octave lands on Eb's)");
+    expect(std::abs(at(L, a, 261.63) - at(in, ai, 261.63)) < 1 && std::abs(at(L, a, 392.0) - at(in, ai, 392.0)) < 1 && std::abs(at(L, a, 1176) - at(in, ai, 1176)) < 1,
+           "C and G stay exactly where they were (and G's overtones too)");
+}
+
 int main() {
-    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar();
+    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar(); testDistance(); testEra(); testSwing(); testMood();
     std::printf(fails ? "FAILED (%d)\n" : "ALL PASS\n", fails);
     return fails ? 1 : 0;
 }

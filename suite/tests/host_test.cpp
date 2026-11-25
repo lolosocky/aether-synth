@@ -285,6 +285,10 @@ int main(int argc, char** argv) {
             { "LGN Limiter", { { "", { { "input", 9 }, { "ceiling", -0.5f } } } } },
             { "LGN Gravity", { { "", { { "key", 9 }, { "scale", 1 }, { "pull", 85 } } } } },
             { "LGN Fret", { { "", { { "pickup", 1 }, { "pupos", 40 }, { "amp", 1 }, { "cab", 1 }, { "body", 0 }, { "chorus", 25 }, { "vmix", 22 } } } } },
+            { "LGN Distance", { { "", { { "distance", 0.62f }, { "angle", 35 }, { "space", 3 } } } } },
+            { "LGN Era", { { "", { { "era", 4 }, { "age", 100 } } } } },
+            { "LGN Swing", { { "", { { "swing", 64 }, { "s5", 10 }, { "s13", 10 } } } } },
+            { "LGN Mood", { { "", { { "key", 0 }, { "flip", 0 } } } } },
             { "LGN Duck", { { "-tempo", { { "mode", 0 }, { "rate", 2 }, { "amount", 80 }, { "release", 55 } } },
                             { "-kick", { { "mode", 1 }, { "amount", 85 }, { "release", 30 } } } } } };
         std::vector<std::pair<juce::String, Settings>> shots{ { "", {} } };

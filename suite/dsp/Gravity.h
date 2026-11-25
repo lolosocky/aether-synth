@@ -15,7 +15,14 @@
 
 namespace lgn {
 
-struct GravityParams { int key = 0, scale = 1; double pull = 0.7, driftMs = 80, mass = 0.2, floorHz = 150, mix = 1.0; };
+struct GravityParams {
+    int key = 0, scale = 1; double pull = 0.7, driftMs = 80, mass = 0.2, floorHz = 150, mix = 1.0;
+    // Mood mode (used by LGN Mood): instead of pulling toward the nearest note, notes whose pitch class (relative
+    // to the key) has a non-zero entry in noteShift move by that many semitones, times `pull`. Each note's
+    // overtones move with it, so chords change mode without going out of tune.
+    bool moodMode = false; bool fine = false;   // fine: twice the analysis size (better for bass, more latency)
+    std::array<double, 12> noteShift{};
+};
 
 class GravityDsp {
 public:
@@ -25,7 +32,7 @@ public:
     static int orderFor(double sr) { return sr <= 50000 ? 11 : sr <= 100000 ? 12 : 13; }
 
     void prepare(double rate) {
-        sr = rate; order = orderFor(sr); N = 1 << order; H = N / 4; NB = N / 2 + 1;
+        sr = rate; order = orderFor(sr) + (p.fine ? 1 : 0); N = 1 << order; H = N / 4; NB = N / 2 + 1;
         fft.init(order);
         win.resize((size_t)N);
         for (int i = 0; i < N; i++) win[(size_t)i] = 0.5 - 0.5 * std::cos(2 * kPi * i / N);
@@ -37,7 +44,7 @@ public:
 
             dry[c].assign((size_t)latency(), 0.0f);
         }
-        midNow.assign((size_t)NB, {}); midPrev.assign((size_t)NB, {});
+        midNow.assign((size_t)NB, {}); midPrev.assign((size_t)NB, {}); chroma.fill(0);
         for (int c = 0; c < 2; c++) { synY[c].assign((size_t)NB, {}); synPh[c].assign((size_t)NB, 0.0); synPending[c].assign((size_t)NB, 0); } sLog.assign((size_t)NB, 0.0); mag.assign((size_t)NB, 0.0); trueBin.assign((size_t)NB, 0.0);
         wellW.assign((size_t)NB, 1.0); regionTarget.assign((size_t)NB, 0.0);
         rover = N - H; dpos = 0; lastKey = -1; lastScale = -1; massGain = 1;
@@ -150,6 +157,8 @@ private:
         // drift: smooth each bin's log ratio toward its region's target
         const double alpha = p.driftMs <= 0.5 ? 1.0 : 1 - std::exp(-(double)H / (p.driftMs * 0.001 * sr));
         std::fill(regionTarget.begin(), regionTarget.end(), 0.0);
+        if (p.moodMode) moodTargets(maxM);
+        else
         for (size_t i = 0; i < peakList.size(); i++) {
             const double f = trueBin[(size_t)peakList[i]] * sr / N;
             const double target = f > 1 ? std::log(nearestNote(f, p.key, p.scale) / f) * p.pull : 0.0;
@@ -243,6 +252,46 @@ private:
         }
         viewCount.store(nv, std::memory_order_release);
     }
+
+    // Mood: group peaks into notes (a fundamental and the overtones that line up with it), then move each note
+    // whose pitch class is marked in noteShift. Also builds a running chroma (how much of each pitch class is
+    // playing) for key detection.
+    void moodTargets(double maxM) {
+        const size_t np = peakList.size();
+        fundOf.assign(np, -1); noteRatio.assign(np, 1.0);
+        const double strong = maxM * 0.02;
+        for (size_t i = 0; i < np; i++) {
+            const double f = trueBin[(size_t)peakList[i]] * sr / N; if (f < 20) continue;
+            // an overtone of a stronger, lower note already found?
+            int best = -1; double bestMag = 0;
+            for (size_t j = 0; j < i; j++) {
+                if (fundOf[j] != (int)j) continue;
+                const double F = trueBin[(size_t)peakList[j]] * sr / N; const double h = std::round(f / F);
+                if (h < 2 || h > 16) continue;
+                const double cents = 1200 * std::log2(f / (h * F));
+                if (std::abs(cents) < 22 && mag[(size_t)peakList[j]] > bestMag) { best = (int)j; bestMag = mag[(size_t)peakList[j]]; }
+            }
+            if (best >= 0 && bestMag > mag[(size_t)peakList[i]] * 0.25) { fundOf[i] = best; continue; }
+            fundOf[i] = (int)i;
+            if (mag[(size_t)peakList[i]] < strong) continue;
+            const double midi = 69 + 12 * std::log2(f / 440.0), nearest = std::round(midi);
+            const int pc = (((int)nearest - p.key) % 12 + 12) % 12;
+            chroma[(size_t)(((int)nearest % 12 + 12) % 12)] += mag[(size_t)peakList[i]] * mag[(size_t)peakList[i]];
+            if (std::abs(midi - nearest) < 0.45 && p.noteShift[(size_t)pc] != 0)
+                noteRatio[i] = std::pow(2.0, p.noteShift[(size_t)pc] / 12.0);
+        }
+        for (size_t i = 0; i < np; i++) {
+            const int fi = fundOf[i]; const double ratio = fi >= 0 ? noteRatio[(size_t)fi] : 1.0;
+            const double target = std::log(ratio) * p.pull;
+            for (int k = regionStart[i]; k <= regionEnd[i]; k++) regionTarget[(size_t)k] = target;
+        }
+        for (auto& c : chroma) c *= 0.995;
+    }
+public:
+    // relative energy of each pitch class (C = 0) over the last few seconds, for key detection (Mood mode)
+    std::array<double, 12> chromaNow() const { return chroma; }
+private:
+    std::vector<int> fundOf; std::vector<double> noteRatio; std::array<double, 12> chroma{};
 
     GravityParams p; double sr = 48000; int order = 11, N = 2048, H = 512, NB = 1025, rover = 1536, dpos = 0, lastKey = -1, lastScale = -1;
     Fft fft{ 11 }; std::vector<double> win; double olaScale = 1, massGain = 1;

@@ -1,6 +1,6 @@
 LGN MIXING SUITE FOR MAC (VST3 + AU)
 
-EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity and Duck (effects), plus Fret (a modelled guitar instrument).
+EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity, Duck, Distance, Era, Swing and Mood (effects), plus Fret (a modelled guitar instrument).
 Duck replaces the older LGN Duck download: same plugin, so your saved projects keep their settings.
 
 1. Double-click install-mac.command. If macOS blocks it, right-click it > Open > Open.

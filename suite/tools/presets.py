@@ -265,6 +265,91 @@ FRET = [
     ("12-String & Doubles", "Chorus Doubles Clean", fr(ELECTRIC, course=1, chorus=30, width=100, vmix=22)),
 ]
 
+# ---------------------------------------------------------------- Distance  (space 0 Studio 1 Room 2 Club 3 Hall 4 Street 5 Stadium 6 Field)
+import math
+def ds_(m, space, angle=0, keep=50, air=100, doppler=50, width=100):
+    return dict(distance=round(math.log(m / 0.15) / math.log(1000), 4), space=space, angle=angle, keep=keep, air=air, doppler=doppler, width=width)
+DISTANCE = [
+    ("Close", "In Your Ear",          ds_(0.2, 0)),
+    ("Close", "Whisper Right",        ds_(0.3, 0, angle=40)),
+    ("Close", "Vocal Booth",          ds_(0.6, 0)),
+    ("Close", "Ad-Lib Left",          ds_(2, 1, angle=-60)),
+    ("Close", "Ad-Lib Right",         ds_(2, 1, angle=60)),
+    ("Room", "Across the Room",       ds_(4, 1)),
+    ("Room", "Corner of the Room",    ds_(6, 1, angle=-35)),
+    ("Room", "Behind the Band",       ds_(8, 2, keep=60)),
+    ("Venue", "Back of the Club",     ds_(18, 2, keep=65)),
+    ("Venue", "Hall Seat",            ds_(12, 3, keep=60)),
+    ("Venue", "Far Choir",            ds_(25, 3, keep=70, width=100)),
+    ("Venue", "Stadium PA",           ds_(80, 5, keep=75)),
+    ("Outside", "Down the Street",    ds_(40, 4, angle=30, keep=60)),
+    ("Outside", "Next Block Over",    ds_(90, 4, angle=-20, keep=70)),
+    ("Outside", "Across the Field",   ds_(120, 6, keep=75)),
+    ("Outside", "Passing Car (automate distance)", ds_(15, 6, angle=50, doppler=100, keep=60)),
+]
+
+# ---------------------------------------------------------------- Era  (era: 0 Shellac 78, 1 AM Radio, 2 Soul Vinyl, 3 Cassette, 4 SP-1200, 5 MPC60, 6 S950,
+#                                         7 VHS, 8 Boombox, 9 MP3 128k, 10 Phone Speaker, 11 Answering Machine)
+def er(era, age=75, grit=100, wobble=100, noise=100, tone=0, width=100, mix=100, out=0):
+    return dict(era=era, age=age, grit=grit, wobble=wobble, noise=noise, tone=tone, width=width, mix=mix, out=out)
+ERA = [
+    ("Vinyl & Shellac", "Dusty Soul Record",   er(2, 85)),
+    ("Vinyl & Shellac", "Clean Vinyl Warmth",  er(2, 45, noise=25)),
+    ("Vinyl & Shellac", "Shellac 78",          er(0, 100)),
+    ("Samplers", "SP-1200 Drums",              er(4, 100)),
+    ("Samplers", "SP-1200 Pitched Down",       er(4, 100, grit=135, tone=-0.2)),
+    ("Samplers", "MPC60 Warmth",               er(5, 90)),
+    ("Samplers", "S950 Filtered",              er(6, 100)),
+    ("Samplers", "Parallel SP Grit",           er(4, 100, grit=150, mix=45)),
+    ("Tape", "Cassette Demo",                  er(3, 80)),
+    ("Tape", "Worn Tape",                      er(3, 100, wobble=160, noise=130)),
+    ("Tape", "VHS Memory",                     er(7, 90)),
+    ("Tape", "Boombox Bump",                   er(8, 85)),
+    ("Devices & Broadcast", "AM Radio Intro",  er(1, 100)),
+    ("Devices & Broadcast", "MP3 2003",        er(9, 80)),
+    ("Devices & Broadcast", "Phone Speaker",   er(10, 100)),
+    ("Devices & Broadcast", "Voicemail",       er(11, 100)),
+    ("Mix Bus", "Lo-Fi Bus Glue",              er(2, 35, noise=20, wobble=50)),
+]
+
+# ---------------------------------------------------------------- Swing  (grid 0 = 1/8, 1 = 1/16; steps s1..s16 in % of a step, + late / - early)
+def sw(swing, grid=1, humanize=0, tail=0, **steps):
+    d = dict(grid=grid, swing=swing, humanize=humanize, tail=tail)
+    for k, v in steps.items(): d[k] = v
+    return d
+SWING = [
+    ("Classic", "Straight",            sw(50)),
+    ("Classic", "MPC 54%",             sw(54)),
+    ("Classic", "MPC 58%",             sw(58)),
+    ("Classic", "MPC 62%",             sw(62)),
+    ("Classic", "Triplet 16ths",       sw(66.7)),
+    ("Classic", "1/8 Shuffle",         sw(66.7, grid=0)),
+    ("Classic", "Hard Swing 75%",      sw(75)),
+    ("Hip-Hop", "Dilla Drunk",         sw(57, humanize=5, s2=4, s3=-4, s5=10, s6=6, s10=2, s11=-4, s13=10, s14=8, s16=-3)),
+    ("Hip-Hop", "Lazy Snare",          sw(54, s5=14, s13=14)),
+    ("Hip-Hop", "Neo-Soul Pocket",     sw(60, humanize=4, s5=8, s13=8)),
+    ("Hip-Hop", "90s Boom Bap",        sw(60, s5=5, s13=5)),
+    ("Hip-Hop", "Trap Bounce",         sw(54, s14=-5, s16=-5)),
+    ("Hip-Hop", "Rushed Hats",         sw(50, s2=-8, s4=-8, s6=-8, s8=-8, s10=-8, s12=-8, s14=-8, s16=-8)),
+    ("Hip-Hop", "Drunk Hats",          sw(55, humanize=12)),
+    ("Hip-Hop", "Half-Time Shuffle",   sw(62, grid=0)),
+]
+
+# ---------------------------------------------------------------- Mood  (flip: 0 Maj->Min, 1 Maj->Harm Min, 2 Maj->Dorian, 3 Maj 3rd only, 4 Min->Maj, 5 Min->Dorian, 6 Min 3rd only)
+def md(flip, mood=100, glide=30, floor=40, mix=100): return dict(flip=flip, mood=mood, glide=glide, floor=floor, mix=mix)
+MOOD = [
+    ("Major to Minor", "Sad Flip",           md(0)),
+    ("Major to Minor", "Dark Harmonic",      md(1)),
+    ("Major to Minor", "Dorian Soul",        md(2)),
+    ("Major to Minor", "Just the Third",     md(3)),
+    ("Major to Minor", "Blue Third",         md(3, mood=50)),
+    ("Minor to Major", "Happy Flip",         md(4)),
+    ("Minor to Major", "Minor to Dorian",    md(5)),
+    ("Minor to Major", "Brighten the Third", md(6)),
+    ("Motion", "Slow Morph (automate Mood)", md(0, glide=400)),
+    ("Motion", "Bass Safe",                  md(0, floor=150)),
+]
+
 # Preset volumes, measured: each preset was rendered playing a strummed progression (or a melody, for the legato
 # presets; host_test --demos) and its volume set so every preset has the same average loudness, peaks <= -1 dBFS.
 FRET_VOLUME = {'Steel Strummer': 2.0, 'Campfire Dreadnought': 3.0, 'Bright Jumbo': 1.5, 'Parlor Fingerpicking': -2.5, 'Pop Acoustic': 3.0, 'Muted Acoustic Rhythm': 4.0, 'Soft Fingerstyle': -3.5, 'DADGAD Drone': 0.5, 'Open G Slide': 6.5, 'Bedroom Demo': 1.5, 'Classical Nylon': -2.0, 'Bossa Thumb': -4.5, 'Flamenco Bright': -1.0, 'Lo-Fi Nylon Loop': -3.0, 'Spanish Lead': 3.0, 'Nylon Wash': -3.0, 'Glassy Single Coil': -1.5, 'Neo-Soul Chorus': -4.0, 'Funk Scratch': -3.0, 'Clean Twin Reverb': 0.0, 'Bridge Twang': -0.5, 'Jazz Box': -10.0, 'Clean Arpeggio Delay': 0.0, 'Warm Neck Pickup': -5.0, 'Blues Crunch': -2.0, 'Classic Rock Rhythm': -4.5, 'Indie Jangle Crunch': 3.0, 'Palm Mute Chug': -2.0, 'Punk Power': -5.5, 'Edge of Breakup': 1.5, 'Singing Lead': -5.0, 'Shred Lead': -5.5, 'Blues Lead': 0.0, 'Slide Lead': 6.0, 'Fuzz Lead': -1.5, '80s Chorus Lead': 1.0, 'Drop D Metal Rhythm': -4.5, 'Dusty Soul Sample': -3.0, 'Rainy Window Nylon': -2.5, '70s Soul Rhythm': 1.0, 'Vinyl Jazz Chords': -10.0, 'Tape-Warped Acoustic': 1.5, 'Bedroom Lo-Fi Clean': -1.5, 'Boom Bap Loop': -5.5, 'Shimmer Swell': -5.0, 'Endless Pad': -4.0, 'Dreamy Arps': 1.0, 'Post-Rock Wall': -2.5, 'Glass Harmonics': -5.5, 'Night Drive': 0.5, 'Trap Guitar Loop': -1.5, 'Sad Trap Acoustic': -2.0, 'Melodic Drill Guitar': -4.0, 'Rage Fuzz Guitar': -2.5, 'Rage Stab': -2.5, 'Astro Wash': 1.5, 'Pluggnb Clean': -0.5, 'Dark Trap Nylon': -2.0, 'Jangle 12-String': -0.5, 'Electric 12-String': -2.0, 'Doubled Wall Acoustic': 0.0, 'Folk 12-String': 0.5, 'Chorus Doubles Clean': -3.5}
@@ -281,6 +366,10 @@ PLUGINS = {
     "gravity": (GRAVITY, ["key", "scale"]),
     "duck": (DUCK, []),
     "fret": (FRET, []),
+    "distance": (DISTANCE, []),
+    "era": (ERA, []),
+    "swing": (SWING, []),
+    "mood": (MOOD, ["key"]),
 }
 
 def num(x):

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  PLUGINS: LGN_EQ LGN_Compressor LGN_DeEsser LGN_Saturator LGN_Reverb LGN_Delay LGN_Limiter LGN_Gravity LGN_Duck LGN_Distance LGN_Era LGN_Swing LGN_Mood LGN_Fret
+  PLUGINS: LGN_EQ LGN_Compressor LGN_DeEsser LGN_Saturator LGN_Reverb LGN_Delay LGN_Limiter LGN_Gravity LGN_Duck LGN_Distance LGN_Era LGN_Swing LGN_Mood LGN_Flipside LGN_Fret
 
 jobs:
   test:
@@ -49,7 +49,7 @@ jobs:
           mkdir -p ~/Library/Audio/Plug-Ins/Components
           cp -R dist/*.component ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
-          for c in LgEq LgCp LgDs LgSt LgRv LgDl LgLm LgGv Duck LgDt LgEr LgSw LgMd; do auval -v aufx $c Lgnx | tail -3; done; auval -v aumu Fret Lgnx | tail -3
+          for c in LgEq LgCp LgDs LgSt LgRv LgDl LgLm LgGv Duck LgDt LgEr LgSw LgMd; do auval -v aufx $c Lgnx | tail -3; done; auval -v aumf LgFs Lgnx | tail -3; auval -v aumu Fret Lgnx | tail -3
       - uses: actions/upload-artifact@v4
         with:
           name: LGN-Suite-mac

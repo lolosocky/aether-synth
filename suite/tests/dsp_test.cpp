@@ -12,6 +12,8 @@
 #include "Distance.h"
 #include "Era.h"
 #include "Swing.h"
+#include "Flipside.h"
+#include <set>
 #include <cstdio>
 #include <functional>
 #include <random>
@@ -546,8 +548,37 @@ static void testMood() {
            "C and G stay exactly where they were (and G's overtones too)");
 }
 
+static void testFlipside() {
+    std::printf("Flipside\n");
+    const auto& b = lgn::FlipBank::get();
+    expect(b.time.size() >= 300 && b.vol.size() >= 500 && b.combos.size() >= 700, "library: " + std::to_string(b.time.size()) + " time, " + std::to_string(b.vol.size()) + " volume, " + std::to_string(b.combos.size()) + " combos");
+    std::set<std::string> names; bool dup = false; for (auto& c : b.combos) dup |= !names.insert(c.category + "/" + c.name).second;
+    expect(!dup, "combo names unique");
+    const double sr = 48000, bpm = 120; const int n = (int)(sr * 4);   // 2 bars at 120
+    auto render = [&](int ti, int vi, double f, std::vector<float>& L) {
+        lgn::FlipsideDsp d; lgn::FlipParams p; d.set(p); d.prepare(sr); d.setCurves(b.time[(size_t)ti].curve, b.vol[(size_t)vi].curve);
+        L.resize((size_t)n); std::vector<float> R((size_t)n);
+        for (int i = 0; i < n; i++) L[(size_t)i] = R[(size_t)i] = (float)(0.5 * std::sin(2 * lgn::kPi * f * i / sr));
+        for (int o = 0; o < n; o += 512) { float* c[2] = { L.data() + o, R.data() + o }; d.process(c, 2, std::min(512, n - o), o * bpm / 60.0 / sr, bpm, true); }
+    };
+    const int full = b.findVol("Full"); double worst = 0, peak = 0; std::string worstName;
+    std::vector<float> y;
+    for (int t = 0; t < (int)b.time.size(); t++) {
+        render(t, full, 220, y);
+        for (int i = 1; i < n; i++) { const double s = std::abs(y[(size_t)i] - y[(size_t)i - 1]); if (s > worst) { worst = s; worstName = b.time[(size_t)t].name; } peak = std::max(peak, (double)std::abs(y[(size_t)i])); }
+    }
+    expect(worst < 0.08, "no clicks in any time curve (worst step " + std::to_string(worst) + ", " + worstName + ")");
+    expect(peak < 0.51, "jump crossfades never raise the level (peak " + std::to_string(peak) + ")");
+    render(b.findTime("Half Speed 2 Bars"), full, 440, y);
+    const size_t a = (size_t)(sr * 0.5);
+    expect(toneLevelDb(y, a, (size_t)sr, 220, sr) > toneLevelDb(y, a, (size_t)sr, 440, sr) + 20, "half speed plays an octave down");
+    double vworst = 0;
+    for (int v = 0; v < (int)b.vol.size(); v++) { render(b.findTime("Pushed Late 1/16"), v, 220, y); for (int i = 1; i < n; i++) vworst = std::max(vworst, (double)std::abs(y[(size_t)i] - y[(size_t)i - 1])); }
+    expect(vworst < 0.04, "volume curves gate without clicks (worst step " + std::to_string(vworst) + ")");
+}
+
 int main() {
-    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar(); testDistance(); testEra(); testSwing(); testMood();
+    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar(); testDistance(); testEra(); testSwing(); testMood(); testFlipside();
     std::printf(fails ? "FAILED (%d)\n" : "ALL PASS\n", fails);
     return fails ? 1 : 0;
 }

@@ -289,6 +289,7 @@ int main(int argc, char** argv) {
             { "LGN Era", { { "", { { "era", 4 }, { "age", 100 } } } } },
             { "LGN Swing", { { "", { { "swing", 64 }, { "s5", 10 }, { "s13", 10 } } } } },
             { "LGN Mood", { { "", { { "key", 0 }, { "flip", 0 } } } } },
+            { "LGN Flipside", { { "", { { "time", 30 }, { "vol", 0 } } } } },
             { "LGN Duck", { { "-tempo", { { "mode", 0 }, { "rate", 2 }, { "amount", 80 }, { "release", 55 } } },
                             { "-kick", { { "mode", 1 }, { "amount", 85 }, { "release", 30 } } } } } };
         std::vector<std::pair<juce::String, Settings>> shots{ { "", {} } };

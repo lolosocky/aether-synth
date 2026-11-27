@@ -28,9 +28,15 @@ set(LGN_PLUGINS "")
 function(lgn_plugin target code product bundle categories source)
   string(REPLACE "|" ";" cats "${categories}")
   set(is_synth FALSE)
+  set(needs_midi FALSE)
   set(au_type kAudioUnitType_Effect)
+  if("MIDI" IN_LIST ARGN)        # an effect that also listens to MIDI notes
+    set(needs_midi TRUE)
+    set(au_type kAudioUnitType_MusicEffect)
+  endif()
   if("INSTRUMENT" IN_LIST ARGN)
     set(is_synth TRUE)
+    set(needs_midi TRUE)
     set(au_type kAudioUnitType_MusicDevice)
   endif()
   juce_add_plugin(${target}
@@ -41,7 +47,7 @@ function(lgn_plugin target code product bundle categories source)
     FORMATS ${LGN_FORMATS}
     PRODUCT_NAME "${product}"
     IS_SYNTH ${is_synth}
-    NEEDS_MIDI_INPUT ${is_synth}
+    NEEDS_MIDI_INPUT ${needs_midi}
     NEEDS_MIDI_OUTPUT FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
     VST3_CATEGORIES ${cats}
@@ -82,6 +88,7 @@ lgn_plugin(LGN_Distance   LgDt "LGN Distance"   distance  "Fx|Spatial"     dista
 lgn_plugin(LGN_Era        LgEr "LGN Era"        era       "Fx|Distortion"  era/EraPlugin.cpp)
 lgn_plugin(LGN_Swing      LgSw "LGN Swing"      swing     "Fx"             swing/SwingPlugin.cpp)
 lgn_plugin(LGN_Mood       LgMd "LGN Mood"       mood      "Fx|Pitch Shift" mood/MoodPlugin.cpp)
+lgn_plugin(LGN_Flipside   LgFs "LGN Flipside"   flipside  "Fx"             flipside/FlipsidePlugin.cpp MIDI)
 
 # DSP unit tests (no JUCE).
 add_executable(lgn_dsp_test EXCLUDE_FROM_ALL tests/dsp_test.cpp)

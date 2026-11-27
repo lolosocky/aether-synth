@@ -1,6 +1,6 @@
 LGN MIXING SUITE FOR WINDOWS (VST3)
 
-EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity, Duck, Distance, Era, Swing and Mood (effects), plus Fret (a modelled guitar instrument).
+EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity, Duck, Distance, Era, Swing, Mood and Flipside (effects), plus Fret (a modelled guitar instrument).
 Duck replaces the older LGN Duck download: same plugin, so your saved projects keep their settings.
 
 1. Copy every .vst3 folder to  C:\Program Files\Common Files\VST3\

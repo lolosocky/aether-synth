@@ -54,43 +54,6 @@ inline const std::vector<Tuning>& tunings() {
     return t;
 }
 
-// 2x oversampler (31-tap windowed-sinc halfband, polyphase) for the amp's distortion, so it does not alias.
-class Oversampler2x {
-public:
-    static constexpr int kTaps = 31, kHalf = 16;
-    Oversampler2x() {
-        const int M = kTaps / 2;
-        std::array<double, kTaps> h{};
-        for (int i = 0; i < kTaps; i++) {
-            const int k = i - M;
-            const double sinc = k == 0 ? 0.5 : std::sin(kPi * k / 2.0) / (kPi * k);
-            const double w = 0.42 - 0.5 * std::cos(2 * kPi * i / (kTaps - 1)) + 0.08 * std::cos(4 * kPi * i / (kTaps - 1));
-            h[(size_t)i] = sinc * w;
-        }
-        double s = 0; for (double v : h) s += v;
-        for (int i = 0; i < kTaps; i++) { hh[(size_t)i] = h[(size_t)i] / s; }
-        for (int k = 0; k < kHalf; k++) { even[(size_t)k] = 2 * (2 * k < kTaps ? hh[(size_t)(2 * k)] : 0); odd[(size_t)k] = 2 * (2 * k + 1 < kTaps ? hh[(size_t)(2 * k + 1)] : 0); }
-    }
-    void reset() { inHist.fill(0); outHist.fill(0); ip = op = 0; }
-    // one input sample in, two output samples at twice the rate
-    void upsample(double x, double& a, double& b) {
-        ip = (ip + kHalf - 1) % kHalf; inHist[(size_t)ip] = x;
-        double sa = 0, sb = 0;
-        for (int k = 0; k < kHalf; k++) { const double v = inHist[(size_t)((ip + k) % kHalf)]; sa += even[(size_t)k] * v; sb += odd[(size_t)k] * v; }
-        a = sa; b = sb;
-    }
-    // two samples at twice the rate in, one out (filtered, then every other sample kept)
-    double downsample(double a, double b) {
-        push(a); push(b);
-        double s = 0; for (int i = 0; i < kTaps; i++) s += hh[(size_t)i] * outHist[(size_t)((op + i) % kTaps)];
-        return s;
-    }
-private:
-    void push(double x) { op = (op + kTaps - 1) % kTaps; outHist[(size_t)op] = x; }
-    std::array<double, kTaps> hh{}, outHist{}; std::array<double, kHalf> even{}, odd{}, inHist{};
-    int ip = 0, op = 0;
-};
-
 class GuitarDsp {
 public:
     static constexpr int kStrings = 6, kVoices = 12;

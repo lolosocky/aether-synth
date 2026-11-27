@@ -13,6 +13,7 @@
 #include "Era.h"
 #include "Swing.h"
 #include "Flipside.h"
+#include "Haze.h"
 #include <set>
 #include <cstdio>
 #include <functional>
@@ -577,8 +578,44 @@ static void testFlipside() {
     expect(vworst < 0.04, "volume curves gate without clicks (worst step " + std::to_string(vworst) + ")");
 }
 
+static void testHaze() {
+    std::printf("Haze\n");
+    const double sr = 48000;
+    using Ev = std::tuple<double, int, bool>;
+    auto render = [&](lgn::HazeParams p, std::vector<Ev> ev, double secs, bool playing) {
+        lgn::HazeDsp d; d.set(p); d.prepare(sr);
+        const int B = 256, N = (int)(secs * sr); std::vector<float> L((size_t)N), R((size_t)N); size_t e = 0; double ppq = 0;
+        for (int o = 0; o < N; o += B) {
+            const int m = std::min(B, N - o); d.setTransport(ppq, 120, playing);
+            while (e < ev.size() && std::get<0>(ev[e]) * sr < o + m) { const int at = std::max(0, (int)(std::get<0>(ev[e]) * sr) - o); if (std::get<2>(ev[e])) d.noteOn(std::get<1>(ev[e]), 0.9, at); else d.noteOff(std::get<1>(ev[e]), at); e++; }
+            d.process(L.data() + o, R.data() + o, m); ppq += m * 2.0 / sr;
+        }
+        return L;
+    };
+    auto zc = [&](const std::vector<float>& x, int a, int n) { int c = 0; double f0 = -1, l = -1; for (int i = a + 1; i < a + n; i++) if (x[(size_t)i - 1] < 0 && x[(size_t)i] >= 0) { const double t = i - 1 + x[(size_t)i - 1] / (x[(size_t)i - 1] - x[(size_t)i]); if (f0 < 0) f0 = t; l = t; c++; } return c > 1 ? (c - 1) * sr / (l - f0) : 0.0; };
+    lgn::HazeParams base; base.osc1.wave = 0; base.fType = 9; base.envAmt = 0; base.drift = 0; base.limiter = false; base.ampEnv = { 0.005, 0.3, 1.0, 0.1 };
+    { auto o = render(base, { { 0, 45, true } }, 1.0, false); expect(std::abs(zc(o, 9600, 24000) - 110) < 0.2, "A2 plays 110 Hz"); }
+    { auto p = base; p.pEnvAmt = 12; p.pEnvTime = 0.2; auto o = render(p, { { 0, 36, true } }, 1.0, false);
+      expect(zc(o, 0, 960) > 90 && std::abs(zc(o, 24000, 19200) - 65.4) < 0.5, "808 pitch envelope falls onto the note"); }
+    { auto p = base; p.glideMode = 1; p.glide = 0.2; auto o = render(p, { { 0, 45, true }, { 0.5, 45, false }, { 0.5, 57, true } }, 1.2, false);
+      const double mid = zc(o, (int)(0.53 * sr), 2400); expect(mid > 115 && mid < 210 && std::abs(zc(o, (int)(0.95 * sr), 9600) - 220) < 1, "glide moves between notes"); }
+    { auto p = base; p.ampEnv = { 0.0003, 1.5, 0.0, 0.05 }; p.pEnvAmt = 7; p.pEnvTime = 0.06; std::vector<Ev> ev;
+      for (int k = 0; k < 16; k++) { ev.push_back({ k * 0.12, 36 + (k % 3) * 5, true }); ev.push_back({ k * 0.12 + 0.1, 36 + (k % 3) * 5, false }); }
+      auto o = render(p, ev, 2.2, false); double st = 0; for (size_t i = 1; i < o.size(); i++) st = std::max(st, (double)std::abs(o[i] - o[i - 1])); expect(st < 0.08, "fast 808 retriggers do not click"); }
+    bool ok = true;
+    for (int f = 0; f < 10; f++) { auto p = base; p.osc1.wave = 2; p.fType = f; p.res = 1; p.fDrive = 24; p.envAmt = 60; p.cutoff = 100; p.fEnv = { 0.2, 0.6, 0.3, 0.2 };
+      auto o = render(p, { { 0, 33, true }, { 1.0, 33, false }, { 1.0, 60, true } }, 1.6, false); for (float x : o) ok = ok && std::isfinite(x) && std::abs(x) < 4; }
+    expect(ok, "all ten filters stay finite at full resonance and drive");
+    { auto p = base; p.osc1.wave = 2; p.fType = 0; p.cutoff = 3000; p.patMode = 3; p.patDiv = 3; p.gate = 0.5; p.ampEnv = { 0.001, 0.05, 1.0, 0.01 };
+      auto o = render(p, { { 0.0, 48, true }, { 2.0, 48, false } }, 2.2, true); int on = 0; double env = 0; bool hi = false;
+      for (float x : o) { env = std::max((double)std::abs(x), env * 0.995); if (!hi && env > 0.1) { hi = true; on++; } if (hi && env < 0.02) hi = false; }
+      expect(on == 16, "sequencer plays 16 sixteenths in 2 s at 120 BPM"); }
+    { auto p = base; p.patMode = 2; p.patDiv = 6; p.gate = 0.9; auto o = render(p, { { 0, 48, true }, { 0, 52, true }, { 0, 55, true } }, 0.8, false);
+      expect(std::abs(zc(o, 2000, 8000) - 130.8) < 2 && std::abs(zc(o, 14000, 8000) - 164.8) < 2 && std::abs(zc(o, 26000, 8000) - 196) < 2, "arp plays the held chord upward"); }
+}
+
 int main() {
-    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar(); testDistance(); testEra(); testSwing(); testMood(); testFlipside();
+    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar(); testDistance(); testEra(); testSwing(); testMood(); testFlipside(); testHaze();
     std::printf(fails ? "FAILED (%d)\n" : "ALL PASS\n", fails);
     return fails ? 1 : 0;
 }

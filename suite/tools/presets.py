@@ -7,7 +7,7 @@ goes to its default when the preset loads, so each preset is complete on its own
 
 Run from suite/:  python3 tools/presets.py
 """
-import os
+import os, sys
 
 # ---------------------------------------------------------------- EQ
 # band shorthand: lc/hc = (freq, slope 0=12 1=24 2=48 dB/oct); others = (freq, gain, q)
@@ -355,6 +355,9 @@ MOOD = [
 FRET_VOLUME = {'Steel Strummer': 2.0, 'Campfire Dreadnought': 3.0, 'Bright Jumbo': 1.5, 'Parlor Fingerpicking': -2.5, 'Pop Acoustic': 3.0, 'Muted Acoustic Rhythm': 4.0, 'Soft Fingerstyle': -3.5, 'DADGAD Drone': 0.5, 'Open G Slide': 6.5, 'Bedroom Demo': 1.5, 'Classical Nylon': -2.0, 'Bossa Thumb': -4.5, 'Flamenco Bright': -1.0, 'Lo-Fi Nylon Loop': -3.0, 'Spanish Lead': 3.0, 'Nylon Wash': -3.0, 'Glassy Single Coil': -1.5, 'Neo-Soul Chorus': -4.0, 'Funk Scratch': -3.0, 'Clean Twin Reverb': 0.0, 'Bridge Twang': -0.5, 'Jazz Box': -10.0, 'Clean Arpeggio Delay': 0.0, 'Warm Neck Pickup': -5.0, 'Blues Crunch': -2.0, 'Classic Rock Rhythm': -4.5, 'Indie Jangle Crunch': 3.0, 'Palm Mute Chug': -2.0, 'Punk Power': -5.5, 'Edge of Breakup': 1.5, 'Singing Lead': -5.0, 'Shred Lead': -5.5, 'Blues Lead': 0.0, 'Slide Lead': 6.0, 'Fuzz Lead': -1.5, '80s Chorus Lead': 1.0, 'Drop D Metal Rhythm': -4.5, 'Dusty Soul Sample': -3.0, 'Rainy Window Nylon': -2.5, '70s Soul Rhythm': 1.0, 'Vinyl Jazz Chords': -10.0, 'Tape-Warped Acoustic': 1.5, 'Bedroom Lo-Fi Clean': -1.5, 'Boom Bap Loop': -5.5, 'Shimmer Swell': -5.0, 'Endless Pad': -4.0, 'Dreamy Arps': 1.0, 'Post-Rock Wall': -2.5, 'Glass Harmonics': -5.5, 'Night Drive': 0.5, 'Trap Guitar Loop': -1.5, 'Sad Trap Acoustic': -2.0, 'Melodic Drill Guitar': -4.0, 'Rage Fuzz Guitar': -2.5, 'Rage Stab': -2.5, 'Astro Wash': 1.5, 'Pluggnb Clean': -0.5, 'Dark Trap Nylon': -2.0, 'Jangle 12-String': -0.5, 'Electric 12-String': -2.0, 'Doubled Wall Acoustic': 0.0, 'Folk 12-String': 0.5, 'Chorus Doubles Clean': -3.5}
 for _c, _n, _v in FRET: _v.setdefault("volume", FRET_VOLUME.get(_n, 0.0))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from haze_presets import HAZE
+
 PLUGINS = {
     "eq": (EQ, ["spectrum"]),
     "comp": (COMP, []),
@@ -370,6 +373,7 @@ PLUGINS = {
     "era": (ERA, []),
     "swing": (SWING, []),
     "mood": (MOOD, ["key"]),
+    "haze": (HAZE, []),
 }
 
 def num(x):

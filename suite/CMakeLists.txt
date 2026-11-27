@@ -84,6 +84,7 @@ lgn_plugin(LGN_Limiter    LgLm "LGN Limiter"    limiter   "Fx|Dynamics"    limit
 lgn_plugin(LGN_Gravity    LgGv "LGN Gravity"    gravity   "Fx|Pitch Shift" gravity/GravityPlugin.cpp)
 lgn_plugin(LGN_Duck       Duck "LGN Duck"       duck      "Fx|Dynamics"    duck/DuckPlugin.cpp)
 lgn_plugin(LGN_Fret       Fret "LGN Fret"       fret      "Instrument|Synth" fret/FretPlugin.cpp INSTRUMENT)
+lgn_plugin(LGN_Haze       LgHz "LGN Haze"       haze      "Instrument|Synth" haze/HazePlugin.cpp INSTRUMENT)
 lgn_plugin(LGN_Distance   LgDt "LGN Distance"   distance  "Fx|Spatial"     distance/DistancePlugin.cpp)
 lgn_plugin(LGN_Era        LgEr "LGN Era"        era       "Fx|Distortion"  era/EraPlugin.cpp)
 lgn_plugin(LGN_Swing      LgSw "LGN Swing"      swing     "Fx"             swing/SwingPlugin.cpp)

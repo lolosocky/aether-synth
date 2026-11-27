@@ -151,6 +151,59 @@ int demos(const juce::String& dir) {
     return 0;
 }
 
+
+// Loudness of every instrument preset (BS.1770-style K-weighting, gated), playing a phrase that suits it:
+// a held note or chord for pattern presets, a melody in the bass or lead register otherwise.
+int levels(const juce::String& outFile, const juce::String& wavDir = {}) {
+    std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
+    auto* lp = dynamic_cast<lgn::Processor*>(p.get());
+    if (!lp || !p->acceptsMidi()) return 1;
+    const double sr = 48000, bpm = 120, beat = 60.0 / bpm; const int B = 256;
+    juce::File f(juce::File::getCurrentWorkingDirectory().getChildFile(outFile)); f.deleteFile(); juce::FileOutputStream os(f);
+    for (int i = 1; i < lp->getNumPrograms(); i++) {
+        lp->setCurrentProgram(i);
+        const auto cat = lp->presets()[(size_t)i].category;
+        const int pat = lp->apvts.getParameter("patmode") ? juce::roundToInt(lp->p("patmode")) : 0;
+        struct Ev { double t; int note; bool on; }; std::vector<Ev> ev;
+        const bool high = cat.startsWith("Lead") || cat == "Pluck" || cat == "Arp";
+        if (pat == 2) for (int n : { 48, 52, 55 }) { ev.push_back({ 0, n, true }); ev.push_back({ 15.5 * beat, n, false }); }
+        else if (pat > 0 || cat == "FX" || (lp->apvts.getParameter("aa") && lp->p("aa") > 300)) { ev.push_back({ 0, high ? 60 : 36, true }); ev.push_back({ 15.5 * beat, high ? 60 : 36, false }); }
+        else { const int mel[] = { 0, 0, 3, 7, 5, 3, 0, -2 }; for (int r = 0; r < 2; r++) for (int k = 0; k < 8; k++) { const double t = (r * 8 + k) * beat; ev.push_back({ t, (high ? 60 : 36) + mel[k], true }); ev.push_back({ t + 0.75 * beat, (high ? 60 : 36) + mel[k], false }); } }
+        std::sort(ev.begin(), ev.end(), [](const Ev& a, const Ev& b) { return a.t < b.t || (a.t == b.t && !a.on && b.on); });
+        // measured before the output limiter, so the peak is the real one
+        if (auto* lim = lp->apvts.getParameter("limiter"); lim && wavDir.isEmpty()) lim->setValueNotifyingHost(0.0f);
+        p->setRateAndBufferSizeDetails(sr, B); TestHead head; p->setPlayHead(&head); p->prepareToPlay(sr, B);
+        const int N = (int)(sr * 17 * beat);
+        juce::AudioBuffer<float> buf(2, B), all(2, N); juce::MidiBuffer midi; size_t e = 0;
+        lgn::Svf kw[2][2]; for (auto& c : kw) { c[0].set(lgn::Svf::highShelf, sr, 1681, 0.71, 4.0); c[1].set(lgn::Svf::highpass, sr, 38, 0.5); }
+        std::vector<double> blocks; double acc = 0; int accN = 0; float peak = 0;
+        for (int o = 0; o < N; o += B) {
+            const int m = std::min(B, N - o); midi.clear();
+            while (e < ev.size() && ev[e].t * sr < o + m) { const int off = std::max(0, (int)(ev[e].t * sr) - o); midi.addEvent(ev[e].on ? juce::MidiMessage::noteOn(1, ev[e].note, (juce::uint8)100) : juce::MidiMessage::noteOff(1, ev[e].note), off); e++; }
+            juce::AudioBuffer<float> view(buf.getArrayOfWritePointers(), 2, m);
+            p->processBlock(view, midi); head.ppq += m * bpm / 60.0 / sr;
+            for (int c = 0; c < 2; c++) all.copyFrom(c, o, view, c, 0, m);
+            for (int k = 0; k < m; k++) for (int c = 0; c < 2; c++) { const double x = view.getSample(c, k); peak = std::max(peak, (float)std::abs(x)); const double y = kw[c][1].process(kw[c][0].process(x)); acc += y * y; }
+            accN += m; if (accN >= (int)(0.4 * sr)) { blocks.push_back(acc / accN); acc = 0; accN = 0; }
+        }
+        p->releaseResources(); p->setPlayHead(nullptr);
+        if (wavDir.isNotEmpty()) {   // the render, through the limiter as a listener would hear it
+            juce::File d(juce::File::getCurrentWorkingDirectory().getChildFile(wavDir)); d.createDirectory();
+            for (int c = 0; c < 2; c++) for (int k = 0; k < N; k++) all.setSample(c, k, juce::jlimit(-0.944f, 0.944f, all.getSample(c, k)));
+            auto wf = d.getChildFile(juce::String(i).paddedLeft('0', 3) + " " + (cat + " - " + lp->getProgramName(i)).replaceCharacters("/&", "-+") + ".wav"); wf.deleteFile();
+            std::unique_ptr<juce::OutputStream> ws(wf.createOutputStream().release()); juce::WavAudioFormat wav;
+            if (auto* w = wav.createWriterFor(ws.get(), sr, 2, 24, {}, 0)) { ws.release(); std::unique_ptr<juce::AudioFormatWriter> wr(w); wr->writeFromAudioSampleBuffer(all, 0, N); }
+        }
+        auto lufs = [](double ms) { return -0.691 + 10 * std::log10(ms + 1e-20); };
+        double s1 = 0; int n1 = 0; for (double b : blocks) if (lufs(b) > -70) { s1 += b; n1++; }
+        const double rel = n1 ? lufs(s1 / n1) - 10 : -70; double s2 = 0; int n2 = 0;
+        for (double b : blocks) if (lufs(b) > -70 && lufs(b) > rel) { s2 += b; n2++; }
+        const double L = n2 ? lufs(s2 / n2) : -100;
+        os << cat << "/" << lp->getProgramName(i) << "\t" << juce::String(L, 2) << "\t" << juce::String(juce::Decibels::gainToDecibels(peak, -200.0f), 2) << "\t" << juce::String(lp->p("volume"), 1) << "\n";
+    }
+    return 0;
+}
+
 int bench(const juce::String& outFile) {
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     auto* lp = dynamic_cast<lgn::Processor*>(p.get());
@@ -194,6 +247,7 @@ int main(int argc, char** argv) {
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 2 && juce::String(argv[1]) == "--bench") return bench(argv[2]);
     if (argc > 2 && juce::String(argv[1]) == "--demos") return demos(argv[2]);
+    if (argc > 2 && juce::String(argv[1]) == "--levels") return levels(argv[2], argc > 3 ? juce::String(argv[3]) : juce::String());
     std::unique_ptr<juce::AudioProcessor> p(createPluginFilter());
     const juce::String name = p->getName();
     std::cout << name << ": " << p->getParameters().size() << " parameters\n";
@@ -237,6 +291,7 @@ int main(int argc, char** argv) {
         const int np = lp->getNumPrograms();
         check(np > 1, "has factory presets");
         for (int i = 0; i < np; i++) {
+            for (auto& [pid, pv] : lp->presets()[(size_t)i].values) check(lp->apvts.getParameter(pid) != nullptr, "preset " + lp->getProgramName(i) + " uses a real parameter: " + pid);
             lp->setCurrentProgram(i);
             check(lp->getCurrentProgram() == i && !lp->presetModified(), "preset " + juce::String(i) + " loads clean");
             float pk = 0;
@@ -289,6 +344,8 @@ int main(int argc, char** argv) {
             { "LGN Era", { { "", { { "era", 4 }, { "age", 100 } } } } },
             { "LGN Swing", { { "", { { "swing", 64 }, { "s5", 10 }, { "s13", 10 } } } } },
             { "LGN Mood", { { "", { { "key", 0 }, { "flip", 0 } } } } },
+            { "LGN Haze", { { "", { { "o1voices", 3 }, { "o1detune", 25 }, { "sublevel", 40 }, { "res", 40 } } },
+                            { "-pattern", { { "patmode", 3 }, { "s3pitch", 12 }, { "s3acc", 1 }, { "s5on", 0 }, { "s7pitch", 7 }, { "s7slide", 1 }, { "s10pitch", -5 }, { "s12acc", 1 }, { "s14pitch", 10 } } } } },
             { "LGN Flipside", { { "", { { "time", 30 }, { "vol", 0 } } } } },
             { "LGN Duck", { { "-tempo", { { "mode", 0 }, { "rate", 2 }, { "amount", 80 }, { "release", 55 } } },
                             { "-kick", { { "mode", 1 }, { "amount", 85 }, { "release", 30 } } } } } };

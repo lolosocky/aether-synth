@@ -14,6 +14,7 @@
 #include "Swing.h"
 #include "Flipside.h"
 #include "Haze.h"
+#include "Strike.h"
 #include <set>
 #include <cstdio>
 #include <functional>
@@ -614,8 +615,51 @@ static void testHaze() {
       expect(std::abs(zc(o, 2000, 8000) - 130.8) < 2 && std::abs(zc(o, 14000, 8000) - 164.8) < 2 && std::abs(zc(o, 26000, 8000) - 196) < 2, "arp plays the held chord upward"); }
 }
 
+static void testStrike() {
+    std::printf("Strike\n");
+    const double sr = 48000;
+    bool ok = true; double worst = 0;
+    for (int m = 0; m < (int)lgn::DrumModel::count; m++) for (double drive : { 0.0, 1.0 }) {   // every model, clean and fully driven, extreme settings
+        lgn::PadParams p; p.model = m; p.drive = drive; p.tone = 1; p.snap = 1; p.click = 1; p.color = 1; p.pitch = 48; p.decay = 2000;
+        std::vector<float> o((size_t)sr); lgn::StrikeDsp::preview(p, sr, o.data(), (int)o.size());
+        for (float x : o) { ok = ok && std::isfinite(x); worst = std::max(worst, (double)std::abs(x)); }
+    }
+    expect(ok && worst < 3, "all 25 drum models stay finite and bounded at extreme settings");
+    // closed hat chokes the open hat
+    auto run = [&](lgn::StrikeGlobal g, std::vector<std::tuple<double, int>> hits, double secs, int ch = 0) {
+        lgn::StrikeDsp d; d.prepare(sr); g.humanize = 0; d.setGlobal(g);
+        lgn::PadParams oh; oh.model = (int)lgn::DrumModel::hatOpen; oh.decay = 1500; oh.choke = 1; oh.note = 46; d.setPad(4, oh);
+        lgn::PadParams chh; chh.model = (int)lgn::DrumModel::hatClosed; chh.decay = 30; chh.choke = 1; chh.note = 42; d.setPad(3, chh);
+        lgn::PadParams k; k.model = 0; k.decay = 800; k.pitch = 0; k.click = 0; k.snap = 0; k.drive = 0; k.color = 0; k.note = 36; d.setPad(0, k);
+        const int N = (int)(secs * sr); std::vector<float> L((size_t)N), R((size_t)N); size_t e = 0;
+        for (int o = 0; o < N; o += 256) {
+            const int m = std::min(256, N - o);
+            while (e < hits.size() && std::get<0>(hits[e]) * sr < o + m) { d.noteOn(std::get<1>(hits[e]), 1.0, std::max(0, (int)(std::get<0>(hits[e]) * sr) - o)); e++; }
+            d.process(L.data() + o, R.data() + o, m);
+        }
+        (void)ch; return L;
+    };
+    lgn::StrikeGlobal clean; clean.character = 0; clean.glue = 0; clean.clip = 0; clean.verbMix = 0;
+    auto rms = [](const std::vector<float>& x, double a, double b) { double e = 0; int n = 0; for (int i = (int)(a * 48000); i < (int)(b * 48000); i++) { e += x[(size_t)i] * x[(size_t)i]; n++; } return std::sqrt(e / std::max(1, n)); };
+    { auto open = run(clean, { { 0.0, 46 } }, 1.0); auto choked = run(clean, { { 0.0, 46 }, { 0.3, 42 } }, 1.0);
+      expect(rms(open, 0.5, 0.9) > 0.003 && rms(choked, 0.5, 0.9) < rms(open, 0.5, 0.9) * 0.05, "the closed hat chokes the open hat"); }
+    // melodic pad: the kick on pad 1 played at C4 (72) is an octave above C3 (60)
+    { lgn::StrikeGlobal g = clean; g.melodicPad = 0;
+      auto zc = [&](const std::vector<float>& x) { int c = 0; for (int i = 4800; i < 4800 + 9600; i++) c += x[(size_t)i - 1] < 0 && x[(size_t)i] >= 0; return c; };
+      const int lo = zc(run(g, { { 0.0, 60 } }, 0.5)), hi = zc(run(g, { { 0.0, 72 } }, 0.5));
+      expect(std::abs(hi - 2 * lo) <= 2, "melodic pad plays chromatically (an octave doubles the pitch)"); }
+    // fast retriggers fade the previous hit instead of cutting it
+    { std::vector<std::tuple<double, int>> hits; for (int k = 0; k < 20; k++) hits.push_back({ k * 0.05, 36 });
+      auto o = run(clean, hits, 1.2); double st = 0; for (size_t i = 1; i < o.size(); i++) st = std::max(st, (double)std::abs(o[i] - o[i - 1])); expect(st < 0.05, "rapid retriggers do not click"); }
+    // every machine character is finite and keeps the level sensible
+    bool chOk = true;
+    for (int c = 0; c < 8; c++) { lgn::StrikeGlobal g; g.character = c; g.amount = 1; g.glue = 0.5; g.clip = 0.5; auto o = run(g, { { 0.0, 36 }, { 0.25, 42 }, { 0.5, 46 } }, 1.2);
+      double pk = 0; for (float x : o) { chOk = chOk && std::isfinite(x); pk = std::max(pk, (double)std::abs(x)); } chOk = chOk && pk < 1.0 && pk > 0.05; }
+    expect(chOk, "all eight machine characters (Clean .. SP-1200 .. Vinyl .. Modern) run clean and stay under 0 dBFS");
+}
+
 int main() {
-    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar(); testDistance(); testEra(); testSwing(); testMood(); testFlipside(); testHaze();
+    testEq(); testComp(); testDeEss(); testSat(); testVerb(); testDelay(); testLimit(); testGravity(); testDuck(); testGuitar(); testDistance(); testEra(); testSwing(); testMood(); testFlipside(); testHaze(); testStrike();
     std::printf(fails ? "FAILED (%d)\n" : "ALL PASS\n", fails);
     return fails ? 1 : 0;
 }

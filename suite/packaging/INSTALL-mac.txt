@@ -1,13 +1,13 @@
 LGN MIXING SUITE FOR MAC (VST3 + AU)
 
-EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity, Duck, Distance, Era, Swing, Mood and Flipside (effects), plus two instruments: Haze (the flagship mono bass synth) and Fret (a modelled guitar).
+EQ, Compressor, De-Esser, Saturator, Reverb, Delay, Limiter, Gravity, Duck, Distance, Era, Swing, Mood and Flipside (effects), plus three instruments: Haze (the flagship mono bass synth), Strike (a drum synthesizer) and Fret (a modelled guitar).
 Duck replaces the older LGN Duck download: same plugin, so your saved projects keep their settings.
 
 1. Double-click install-mac.command. If macOS blocks it, right-click it > Open > Open.
    (Or copy the .vst3 files to /Library/Audio/Plug-Ins/VST3/ and the .component files to
    /Library/Audio/Plug-Ins/Components/ yourself.)
 2. In FL Studio: Options > Manage plugins > Find more plugins.
-3. The effects appear under Effects as "LGN EQ", "LGN Compressor" and so on. LGN Haze and LGN Fret appear under Generators.
+3. The effects appear under Effects as "LGN EQ", "LGN Compressor" and so on. LGN Haze, LGN Strike and LGN Fret appear under Generators.
 
 Presets: click the preset name at the top of any plugin for the factory presets, or use the
 < > arrows to step through them. They also appear in your DAW's own preset menu.

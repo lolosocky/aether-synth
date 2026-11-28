@@ -344,6 +344,7 @@ int main(int argc, char** argv) {
             { "LGN Era", { { "", { { "era", 4 }, { "age", 100 } } } } },
             { "LGN Swing", { { "", { { "swing", 64 }, { "s5", 10 }, { "s13", 10 } } } } },
             { "LGN Mood", { { "", { { "key", 0 }, { "flip", 0 } } } } },
+            { "LGN Strike", { { "", { } } } },
             { "LGN Haze", { { "", { { "o1voices", 3 }, { "o1detune", 25 }, { "sublevel", 40 }, { "res", 40 } } },
                             { "-pattern", { { "patmode", 3 }, { "s3pitch", 12 }, { "s3acc", 1 }, { "s5on", 0 }, { "s7pitch", 7 }, { "s7slide", 1 }, { "s10pitch", -5 }, { "s12acc", 1 }, { "s14pitch", 10 } } } } },
             { "LGN Flipside", { { "", { { "time", 30 }, { "vol", 0 } } } } },

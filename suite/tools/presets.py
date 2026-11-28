@@ -357,6 +357,8 @@ for _c, _n, _v in FRET: _v.setdefault("volume", FRET_VOLUME.get(_n, 0.0))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from haze_presets import HAZE
+import strike_presets
+from strike_presets import STRIKE
 
 PLUGINS = {
     "eq": (EQ, ["spectrum"]),
@@ -374,6 +376,7 @@ PLUGINS = {
     "swing": (SWING, []),
     "mood": (MOOD, ["key"]),
     "haze": (HAZE, []),
+    "strike": (STRIKE, []),
 }
 
 def num(x):
@@ -391,3 +394,6 @@ for folder, (presets, keep) in PLUGINS.items():
               "inline juce::StringArray presetKeep() { return { " + ", ".join(f'"{k}"' for k in keep) + " }; }", ""]
     with open(os.path.join(here, "..", folder, "Presets.inc"), "w") as f: f.write("\n".join(lines))
     print(f"{folder}: {len(presets)} presets")
+
+# LGN Strike's per-pad sound library
+strike_presets.write_sounds(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "strike", "Sounds.inc"))
